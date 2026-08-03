@@ -81,9 +81,46 @@ Legend: `[x]` implemented · `[ ]` open · **(iPad)** = must be verified on-devi
 
 ## Phase 4 — Bodies, proportions & posing
 
-- [ ] Bundled parametric base meshes: humanoid realistic + humanoid toon (quadruped later)
-- [ ] Non-destructive proportion sliders: height, head size, limb length/thickness, hands/feet, build (slim↔heavy)
-- [ ] Skeleton + IK handles (drag hand → arm solves), pinnable feet, joint limits
+### Anatomy Slider Engine (pulled forward by request — done)
+- [x] Procedural shared-topology base body (superellipse lofts through anatomical
+      stations → C1-continuous silhouettes); realistic + toon as morph recipes
+- [x] Morph system: 70+ sliders baked as vertex deltas (generator param diffs +
+      analytic displacement fields), composed additively in a Web Worker
+      (~0.4 ms/frame), never touching three.js's built-in morph-target limit
+- [x] Macro sliders: height, build, muscle, body fat, age, frame (masc↔fem),
+      waist-hip ratio, glamour (coordinated silhouette shift), head units
+      (2.5 chibi ↔ 8+ heroic)
+- [x] Micro sliders per region: face (18), neck, torso/chest (11), waist/hips/
+      glutes (12), arms, hands, legs, feet + fantasy race morphs (elf ears,
+      brow ridge, tusks, hunch, limb ratio)
+- [x] Silhouette controls: V-taper, hip flare, waist definition, glute shape,
+      thigh–hip transition, posture set
+- [x] Anthropometric grounding: 50% = average adult (170 cm, 7.7 heads,
+      chest 84 / waist 73 / hip 90); live cm measurements from the mesh
+- [x] Preset library: 19 presets (realistic / heroic / anime / fantasy),
+      cross-category blending with one interpolation slider, save custom
+- [x] Slider ergonomics: center detent, double-tap reset, hold-to-snap to canon
+      values, slow-drag fine precision, search/filter, randomize with per-group
+      locks + natural-asymmetry jitter
+- [x] Tap-a-region opens its slider group; on-model drag handles (shoulders,
+      waist, hips, chin, bust, glutes, …) mapped to the same sliders
+- [x] Global symmetry with per-slider L/R unlink
+- [x] Non-destructive: character = parameter dict saved with the project;
+      sculpt-delta layer rides on top so sliders stay live after sculpting;
+      bake-to-static warns before freezing sliders
+- [x] Skeleton derives from mesh landmarks, recomputes with every morph;
+      pose-check presets (arms up, reach, squat, contrapposto) via worker CPU
+      skinning — verified clean at chibi and heroic extremes
+- [x] NSFW anatomy module: per-project toggle, off by default, engine-level
+      hard gate — explicit morphs auto-disable for child-coded proportions
+      (< 5.5 head-units or < 125 cm measured), verified by test
+- [x] Export: STL/OBJ bake via manifold union of body parts (watertight,
+      verified); GLB optionally ships all sliders as named blendshapes + rig
+- [x] Headless verification suite (`npm run smoke:anatomy`, 19 checks)
+- [ ] **(iPad)** slider drag at 60fps on-device; handles finger-sized; Pencil fine-drag
+
+### Posing (remaining Phase 4 scope)
+- [ ] IK handles (drag hand → arm solves), pinnable feet, joint limits
 - [ ] Pose mirroring (copy L↔R) **and** asymmetry mode (per-side pose/scale)
 - [ ] Pose library (save/apply), A/T-pose reset
 - [ ] "Bake for print": merge + voxel-remesh posed figure watertight → STL
