@@ -15,7 +15,8 @@
     "smoke": "node scripts/smoke.mjs",
     "smoke:anatomy": "node scripts/anatomy-smoke.mjs",
     "deploy": "node scripts/deploy.mjs",
-    "smoke:update": "node scripts/update-smoke.mjs"
+    "smoke:update": "node scripts/update-smoke.mjs",
+    "smoke:pose": "node scripts/pose-smoke.mjs"
   },
   "dependencies": {
     "idb": "^8.0.2",

@@ -131,12 +131,32 @@ Legend: `[x]` implemented · `[ ]` open · **(iPad)** = must be verified on-devi
 - [x] Headless verification suite (`npm run smoke:anatomy`, 19 checks)
 - [ ] **(iPad)** slider drag at 60fps on-device; handles finger-sized; Pencil fine-drag
 
-### Posing (remaining Phase 4 scope)
-- [ ] IK handles (drag hand → arm solves), pinnable feet, joint limits
-- [ ] Pose mirroring (copy L↔R) **and** asymmetry mode (per-side pose/scale)
-- [ ] Pose library (save/apply), A/T-pose reset
-- [ ] "Bake for print": merge + voxel-remesh posed figure watertight → STL
-- [ ] **(iPad)** IK dragging at 60fps; baked STL slices cleanly
+### Pose Library & Adaptive Retargeting (done)
+- [x] Semantic pose presets: normalized local rotations + landmark contact
+      constraints (with priority + reach fallbacks) + gaze + ground contacts +
+      body-dimension-anchored role frames — never raw world positions
+- [x] Retargeting solve: role-frame placement from real dimensions → two-bone
+      IK scaled to actual limb lengths (reach-clamped meet points, spine-lean
+      assist for size gaps) → posed-torso capsule collision (girth-derived
+      radii) → iterative ground settle with a nothing-below-floor clamp
+- [x] 50 shipped SFW poses: 20 solo · 20 duo · 10 trio+ — doubling as the
+      solver regression corpus
+- [x] Pose mirroring, blend-any-two (one slider), role swap, rest reset —
+      all undoable, all through the same solver
+- [x] Authoring: pose figures → "Save scene as pose" auto-extracts contacts
+      (chain-deduped), role frames, grounds, participant count; JSON
+      import/export for sharing libraries
+- [x] NSFW pose category: gated behind the module toggle, ships EMPTY, filled
+      only by user-authored presets; identical retargeting treatment; imports
+      of adult-categorized presets require the module enabled
+- [x] Regression (`npm run smoke:pose`): Warm Hug chibi×heroic 0.9 cm contacts
+      / zero interpenetration; goblin×pin-up exact; Cheer Pyramid with
+      powerlifter+waif+chibi holds contacts grounded; 400 solo-pose × body
+      combinations clean; authored round-trip; role swap; undo
+- [ ] IK handles for direct manipulation posing (drag a hand → arm solves,
+      per-limb pinning UI) — solver primitives exist, interactive layer next
+- [ ] **(iPad)** pose apply latency + gesture feel on-device
+- [ ] "Bake for print": voxel-remesh of posed figure (needs Phase 2 pipeline)
 
 ## Phase 5 — Color & paint
 
