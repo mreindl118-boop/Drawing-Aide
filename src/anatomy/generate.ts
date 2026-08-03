@@ -473,6 +473,7 @@ export function emitBody(P: GenParams, em: Emitter): {
       knuckle[1] + hDir[1] * P.fingerLen,
       knuckle[2] + hDir[2] * P.fingerLen
     ];
+    landmarks[`palm${side}`] = mid(wrist, knuckle, 0.6);
   }
 
   // ------------------------------------------------------------------- legs
@@ -551,6 +552,7 @@ export function emitBody(P: GenParams, em: Emitter): {
 
   landmarks.neckBase = [0, P.neckBaseY, P.neckZ];
   landmarks.chestC = [0, P.chestY, P.chestZ + P.chestDf];
+  landmarks.backC = [0, P.chestY - 0.03, P.chestZ - P.chestDb];
   return { joints, landmarks };
 }
 
@@ -568,9 +570,8 @@ export function buildTopology(): Topology {
   for (let i = 0; i < em.cursor; i++) {
     side[i] = Math.max(-1, Math.min(1, em.positions[i * 3] / 0.05));
   }
-  // landmark → nearest vertex
-  const landmarkVerts: Record<string, number> = {};
-  for (const [name, p] of Object.entries(landmarks)) {
+  // landmark → nearest vertex; L-suffixed landmarks get an auto-mirrored R
+  const nearest = (p: [number, number, number]): number => {
     let best = 0;
     let bestD = Infinity;
     for (let i = 0; i < em.cursor; i++) {
@@ -583,7 +584,17 @@ export function buildTopology(): Topology {
         best = i;
       }
     }
-    landmarkVerts[name] = best;
+    return best;
+  };
+  const landmarkVerts: Record<string, number> = {};
+  for (const [name, p] of Object.entries(landmarks)) {
+    landmarkVerts[name] = nearest(p);
+    if (name.endsWith('L') && Math.abs(p[0]) > 0.015) {
+      const rName = name.slice(0, -1) + 'R';
+      if (!(rName in landmarks)) {
+        landmarkVerts[rName] = nearest([-p[0], p[1], p[2]]);
+      }
+    }
   }
   cachedTopo = {
     vertCount: em.cursor,
