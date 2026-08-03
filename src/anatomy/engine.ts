@@ -2,6 +2,7 @@
  *  figure; per-figure runtimes issue compose requests with latest-wins
  *  scheduling so slider drags never queue up behind stale frames. */
 import * as THREE from 'three';
+import EngineWorker from './engine.worker?worker';
 import type { GeoData } from '../core/types';
 import type { CharacterParams } from './character';
 
@@ -55,7 +56,7 @@ export class AnatomyEngine {
   }
 
   constructor() {
-    this.worker = new Worker(new URL('./engine.worker.ts', import.meta.url), { type: 'module' });
+    this.worker = new EngineWorker();
     this.readyPromise = new Promise((resolve, reject) => {
       this.pending.set(0, { resolve: resolve as never, reject });
     });

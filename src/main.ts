@@ -90,6 +90,19 @@ function exposeTestHooks(): void {
       return true;
     },
     // ---- pose system hooks ----
+    poseLibraryCounts: async () => {
+      const lib = editor!.figures.poseLibrary();
+      const { PRESETS } = await import('./anatomy/presets');
+      const by = (c: string) => lib.shipped.filter((p) => p.category === c).length;
+      return {
+        solo: by('solo'),
+        duo: by('duo'),
+        trio: by('trio'),
+        nsfwShipped: by('nsfw'),
+        bodyPresets: PRESETS.length,
+        allPoseIds: lib.shipped.map((p) => p.id)
+      };
+    },
     applyPoseById: async (poseId: string, ids?: string[]) => {
       const { POSE_BY_ID } = await import('./anatomy/pose/library');
       const p = POSE_BY_ID.get(poseId);

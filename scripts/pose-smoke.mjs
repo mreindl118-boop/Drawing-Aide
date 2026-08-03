@@ -183,6 +183,69 @@ try {
     soloResult.length ? soloResult.slice(0, 5).join(' | ') : '400 combinations'
   );
 
+  // ---- complete shipped library: counts + every duo/trio applies ------------
+  const counts = await page.evaluate(() => window.__sculptpad.poseLibraryCounts());
+  check(
+    'library ships 20 solo · 20 duo · 10 trio poses',
+    counts.solo === 20 && counts.duo === 20 && counts.trio === 10,
+    `${counts.solo}/${counts.duo}/${counts.trio}`
+  );
+  check('NSFW pose category ships empty (user-authored only)', counts.nsfwShipped === 0);
+  check('20 body presets ship', counts.bodyPresets === 20, String(counts.bodyPresets));
+
+  const librarySweep = await page.evaluate(async ({ ids, all }) => {
+    const sp = window.__sculptpad;
+    await sp.applyPresetBlend(ids[0], 'average_masc', 'average_masc', 1);
+    await sp.applyPresetBlend(ids[1], 'average_fem', 'average_fem', 1);
+    await sp.applyPresetBlend(ids[2], 'athletic', 'athletic', 1);
+    const bad = [];
+    for (const poseId of all) {
+      const res = await sp.applyPoseById(poseId, ids);
+      if (!res) {
+        bad.push(`${poseId}: no result`);
+        continue;
+      }
+      const worst = res.contactErrors.length ? Math.max(...res.contactErrors) : 0;
+      if (worst > 0.12) bad.push(`${poseId}: contact ${(worst * 100).toFixed(0)}cm`);
+      for (const id of ids) {
+        const obj = sp.editor.doc.get(id);
+        const p = obj.geo.positions;
+        const ty = obj.transform.position[1];
+        for (let i = 1; i < p.length; i += 3) {
+          if (!Number.isFinite(p[i])) {
+            bad.push(`${poseId}: NaN`);
+            break;
+          }
+        }
+        void ty;
+      }
+    }
+    return bad;
+  }, { ids: [idA, idB, idC], all: counts.allPoseIds });
+  check(
+    'every shipped pose applies cleanly (full 50-pose sweep)',
+    librarySweep.length === 0,
+    librarySweep.length ? librarySweep.slice(0, 6).join(' | ') : '50 poses'
+  );
+
+  // panel actually lists them (UI wiring, not just data)
+  const uiCounts = await page.evaluate(() => {
+    const sp = window.__sculptpad;
+    sp.editor.select(sp.editor.doc.list().find((o) => o.character).id);
+    sp.editor.figures.openPanel(sp.editor.doc.list().find((o) => o.character).id);
+    const panel = document.querySelector('.side-panel');
+    // first .preset-chips container = the body-preset chip row
+    const bodyChips = panel.querySelector('.preset-chips').querySelectorAll('.preset-chip').length;
+    // pose library group renders category chips + list
+    const poseChips = panel.querySelectorAll('.pose-list .preset-chip').length;
+    return { bodyChips, poseChips };
+  });
+  check(
+    'body panel lists the preset chips',
+    uiCounts.bodyChips >= 20 && uiCounts.poseChips === 20,
+    `${uiCounts.bodyChips} body chips, ${uiCounts.poseChips} solo pose chips`
+  );
+
   // ---- authored preset round-trip -------------------------------------------
   const authored = await page.evaluate(async ({ a, b, extra }) => {
     const sp = window.__sculptpad;

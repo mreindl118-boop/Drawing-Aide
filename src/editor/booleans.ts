@@ -1,3 +1,4 @@
+import ManifoldWorker from '../workers/manifold.worker?worker';
 import type { GeoData } from '../core/types';
 
 interface PendingCall {
@@ -20,9 +21,7 @@ export class BooleanEngine {
 
   private ensureWorker(): Worker {
     if (!this.worker) {
-      this.worker = new Worker(new URL('../workers/manifold.worker.ts', import.meta.url), {
-        type: 'module'
-      });
+      this.worker = new ManifoldWorker();
       this.worker.onmessage = (e) => {
         const { id, ok, error, ...rest } = e.data;
         const call = this.pending.get(id);
