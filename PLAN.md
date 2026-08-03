@@ -129,6 +129,17 @@ Legend: `[x]` implemented · `[ ]` open · **(iPad)** = must be verified on-devi
 - [x] Export: STL/OBJ bake via manifold union of body parts (watertight,
       verified); GLB optionally ships all sliders as named blendshapes + rig
 - [x] Headless verification suite (`npm run smoke:anatomy`, 19 checks)
+- [x] Realism pass: corrected mesh winding (was inside-out since Phase 1),
+      monotone loft interpolation, domed caps, buried neck/shoulder/hip
+      junctions, skull-shaped head, ~2× resolution, always-on anatomical
+      surface detail (face features, clavicles, abs, scapulae, creases),
+      muscle-definition / soft-folds / trapezius sliders, distinct face +
+      surface recipes on all 20 presets
+- [x] Expression system: 11 expression sliders (smile, jaw, pucker, brows,
+      eyes, squint, sneer, cheek puff, pout) + identity micros, one-tap
+      expression bundles, per-side unlink (winks), GLB blendshape export
+- [ ] Ongoing: face fidelity iteration (features still clay-soft; next lever
+      is region-adaptive mesh density in the face patch)
 - [ ] **(iPad)** slider drag at 60fps on-device; handles finger-sized; Pencil fine-drag
 
 ### Pose Library & Adaptive Retargeting (done)
