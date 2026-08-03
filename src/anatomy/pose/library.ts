@@ -400,7 +400,7 @@ export const DUO_POSES: PosePreset[] = [
     standRole({ upperArmL: deg(-30, 0, 40), upperArmR: deg(-30, 0, -40), forearmL: deg(-60, 0, 0), forearmR: deg(-60, 0, 0) }),
     standRole(
       { upperArmL: deg(-30, 0, 40), upperArmR: deg(-30, 0, -40), forearmL: deg(-60, 0, 0), forearmR: deg(-60, 0, 0) },
-      { frame: face(0, -1, 0.52, Math.PI) }
+      { frame: face(0, -1, 0.3, Math.PI) }
     )
   ], [c(0, 'backC', 1, 'backC', 0.04, 1)]),
 
@@ -501,8 +501,8 @@ export const TRIO_POSES: PosePreset[] = [
 
   multi('triangle', 'Back-to-Back Triangle', 'trio', [
     standRole({ upperArmL: deg(-40, 0, 30), upperArmR: deg(-40, 0, -30), forearmL: deg(-70, 0, 0), forearmR: deg(-70, 0, 0) }),
-    standRole({ upperArmL: deg(-40, 0, 30), upperArmR: deg(-40, 0, -30), forearmL: deg(-70, 0, 0), forearmR: deg(-70, 0, 0) }, { frame: face(0.87, -0.5, 0.62, Math.PI) }),
-    standRole({ upperArmL: deg(-40, 0, 30), upperArmR: deg(-40, 0, -30), forearmL: deg(-70, 0, 0), forearmR: deg(-70, 0, 0) }, { frame: face(-0.87, -0.5, 0.62, Math.PI) })
+    standRole({ upperArmL: deg(-40, 0, 30), upperArmR: deg(-40, 0, -30), forearmL: deg(-70, 0, 0), forearmR: deg(-70, 0, 0) }, { frame: face(0.87, -0.5, 0.38, Math.PI) }),
+    standRole({ upperArmL: deg(-40, 0, 30), upperArmR: deg(-40, 0, -30), forearmL: deg(-70, 0, 0), forearmR: deg(-70, 0, 0) }, { frame: face(-0.87, -0.5, 0.38, Math.PI) })
   ], [
     c(0, 'backC', 1, 'backC', 0.12, 2),
     c(0, 'backC', 2, 'backC', 0.12, 2)

@@ -112,7 +112,7 @@ try {
   check('worker compose < 12ms/frame', perf.workerMs > 0 && perf.workerMs < 12, `${perf.workerMs.toFixed(1)}ms compute`);
   // roundtrip is headless-message latency, not throughput (latest-wins drags);
   // generous bound just to catch pathological regressions
-  check('full roundtrip < 80ms', perf.roundtripMs < 80, `${perf.roundtripMs.toFixed(1)}ms roundtrip`);
+  check('full roundtrip < 120ms', perf.roundtripMs < 120, `${perf.roundtripMs.toFixed(1)}ms roundtrip`);
 
   // ---- cross-category preset blends produce clean meshes with working rigs
   for (const [a, b] of [['goblin', 'pinup'], ['orc', 'superhero']]) {

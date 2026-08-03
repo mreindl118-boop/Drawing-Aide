@@ -151,22 +151,27 @@ Legend: `[x]` implemented · `[ ]` open · **(iPad)** = must be verified on-devi
 - [ ] Ongoing: face fidelity iteration. Procedural gaussian fields have hit
       their ceiling for photorealism — remaining tells are the infraorbital
       ring-crease, part-junction seams, and texture-less skin close up.
-- [ ] **Next phase — MakeHuman (CC0) mesh backend for photorealism.**
-      MakeHuman's assets (base mesh + all morph targets) are CC0 since 2020;
-      its architecture is identical to ours (fixed-topology base +
-      per-vertex offset targets), so the compose worker, slider catalog,
-      sculpt layer, GLB blendshapes, and pose retargeting carry over.
-      Verified fetchable from this environment:
-      `makehumancommunity/makehuman` → `data/3dobjs/base.obj` (19,158 verts,
-      13,380-vert body + helpers, CC0 header confirmed),
-      `data/targets/**` (per-vertex offset files), and
-      `data/modifiers/modeling_modifiers.json` (slider → target wiring).
-      Plan: (1) fetch + convert to a compact binary bundle (body-only mesh,
-      curated target set); (2) landmark/skeleton mapping onto MH vertex
-      indices; (3) dual-backend worker (procedural stays for toon/chibi);
-      (4) CC0 skin textures for true surface detail. Rejected: MB-Lab
-      (AGPL data, archived 2024), SMPL-X (non-commercial license).
-      Alternative worth watching: CharMorph's CC0/CC-BY base characters.
+- [x] **MakeHuman (CC0) mesh backend — SHIPPED.** The figure engine now runs
+      on the MakeHuman base mesh (13,380-vert sculpted body + fitted eyeball
+      helpers, all CC0): `scripts/build-mh-bundle.mjs` converts base.obj +
+      curated targets + the default rig into a 2.8 MB quantized bundle
+      (`src/anatomy/mh/`). Slider catalog unchanged — every slider now
+      composes from (a) sculpted MakeHuman target deltas (macros, face
+      details, measure-circ girths), (b) synthesized bone-space morphs
+      (lengths, postures, proportions), and/or (c) the existing gaussian
+      fields (expressions, fantasy, NSFW) re-anchored to auto-located
+      MakeHuman landmarks. 163-bone rig collapsed to our 17 bones; joint
+      cubes drive the skeleton and morph with targets; dense synthetic
+      eyeballs (painted sclera/iris/pupil) rigidly follow their morphing
+      anchors. Body mesh is closed → watertight STL without part unions.
+      Three new ethnicity sliders (African/Asian/European) from the CC0
+      macro targets. All 20 presets rebuilt for the new anatomy with
+      calibrated heights (dwarf 135 cm, goblin ~125 cm, superhero 190 cm).
+      Rejected alternatives: MB-Lab (AGPL data, archived 2024), SMPL-X
+      (non-commercial). Procedural generator retained in-tree for reference.
+- [ ] Ongoing polish: brow-stroke paint placement, CC0 skin textures
+      (albedo/normal) on the MakeHuman UVs, MH expression targets as an
+      upgrade over field-based expressions.
 - [ ] **(iPad)** slider drag at 60fps on-device; handles finger-sized; Pencil fine-drag
 
 ### Pose Library & Adaptive Retargeting (done)

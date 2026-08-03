@@ -344,6 +344,11 @@ export const MORPHS: MorphDef[] = [
     pos: { fields: [fc('chin', 0.03, 0.008, [0, 0, 1], { stretch: [1.3, 1, 1] }), fc('mouth', 0.014, 0.004, [0, 0, 1], { offset: [0, -0.006, 0] })] },
     neg: { fields: [fc('chin', 0.03, -0.007, [0, 0, 1], { stretch: [1.3, 1, 1] })] } },
 
+  // ---- ethnic feature blends (MakeHuman CC0 macro targets; freely mixable)
+  { id: 'features_african', label: 'Features: African', group: 'head', bipolar: false, pos: {} },
+  { id: 'features_asian', label: 'Features: Asian', group: 'head', bipolar: false, pos: {} },
+  { id: 'features_european', label: 'Features: European', group: 'head', bipolar: false, pos: {} },
+
   // ============================================== EXPRESSIONS (rig-ready)
   ...EXPRESSIONS.map((e): MorphDef => ({
     id: e.id,
@@ -497,13 +502,13 @@ export const MORPHS: MorphDef[] = [
 
   // ============================================================ RACE MORPHS
   { id: 'ear_length', label: 'Ear length (elf)', group: 'race', bipolar: false,
-    pos: { fields: [f('earL', 0.03, 0.022, [0.5, 0.75, -0.35], { offset: [0.008, 0.012, -0.008], stretch: [1, 1.4, 1] })] } },
+    pos: { fields: [f('earL', 0.032, 0.045, [0.5, 0.85, -0.4], { offset: [0.008, 0.014, -0.008], stretch: [1, 1.5, 1] })] } },
   { id: 'ear_point', label: 'Ear point', group: 'race', bipolar: false,
-    pos: { fields: [f('earL', 0.014, 0.012, [0.4, 1, -0.3], { offset: [0.006, 0.02, -0.01] })] } },
+    pos: { fields: [f('earL', 0.018, 0.028, [0.4, 1, -0.35], { offset: [0.006, 0.022, -0.01] })] } },
   { id: 'brow_ridge', label: 'Brow ridge (orc)', group: 'race', bipolar: false,
-    pos: { fields: [f('browL', 0.04, 0.012, [0, 0.15, 1]), fc('foreheadC', 0.05, -0.008, [0, 0, 1], { offset: [0, 0.02, 0] })] } },
+    pos: { fields: [f('browL', 0.042, 0.02, [0, 0.2, 1]), fc('foreheadC', 0.05, -0.012, [0, 0, 1], { offset: [0, 0.02, 0] })] } },
   { id: 'tusks', label: 'Jaw / tusks', group: 'race', bipolar: false,
-    pos: { params: (P) => ({ jawW: P.jawW * 1.18, jawDf: P.jawDf * 1.15 }), fields: [f('mouth', 0.018, 0.012, [0.25, 0.6, 0.8], { offset: [0.018, -0.008, 0] })] } },
+    pos: { fields: [f('mouth', 0.02, 0.02, [0.25, 0.5, 0.85], { offset: [0.02, -0.01, 0] }), f('jawSideL', 0.03, 0.014, [0.8, -0.2, 0.3])] } },
   { id: 'hunch', label: 'Hunch', group: 'race', bipolar: false,
     pos: { params: (P) => ({ upperChestZ: P.upperChestZ - 0.045, neckZ: P.neckZ - 0.06, headZ: P.headZ - 0.03, chestDb: P.chestDb * 1.2, headBaseY: P.headBaseY - 0.02, crownY: P.crownY - 0.025 }) } },
   { id: 'limb_ratio', label: 'Limb ratio (long arms)', group: 'race', bipolar: false,

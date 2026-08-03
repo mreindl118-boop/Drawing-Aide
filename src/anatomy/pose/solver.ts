@@ -395,6 +395,15 @@ export function solvePose(
     }
   };
 
+  // pairs whose contacts join torso landmarks (back-to-back, embrace) get a
+  // relaxed collision floor — the pose explicitly wants torso proximity
+  const torsoContactPairs = new Set<string>();
+  for (const c of preset.contacts ?? []) {
+    if (!LANDMARK_CHAIN[c.a.landmark] && !LANDMARK_CHAIN[c.b.landmark]) {
+      torsoContactPairs.add(`${Math.min(c.a.role, c.b.role)}:${Math.max(c.a.role, c.b.role)}`);
+    }
+  }
+
   // 2 ── iterate: ground-settle → contact IK → collision separation …
   //      (grounded bodies settle FIRST so contacts target final heights)
   for (let iter = 0; iter < 7; iter++) {
@@ -500,7 +509,7 @@ export function solvePose(
     }
 
     // 3 ── body-volume collision: torso capsules from the POSED pelvis/chest
-    //      joints (a kneeling base and a mounted flyer don't falsely collide)
+    //      joints (a kneeling base and a mounted flyer don't falsely collide).
     const torsos = states.map((s) => {
       const f = fk(s);
       const pelvisJ = f.joints[s.rest.boneNames.indexOf('pelvis')];
@@ -520,7 +529,8 @@ export function solvePose(
         const dx = tj.cx - ti.cx;
         const dz = tj.cz - ti.cz;
         const d = Math.hypot(dx, dz);
-        const minD = (states[i].rest.bodyRadius + states[j].rest.bodyRadius) * 0.82;
+        const relax = torsoContactPairs.has(`${i}:${j}`) ? 0.45 : 1;
+        const minD = (states[i].rest.bodyRadius + states[j].rest.bodyRadius) * 0.82 * relax;
         if (d < minD && d > 1e-5) {
           const push: Vec3 = [(dx / d) * ((minD - d) / 2), 0, (dz / d) * ((minD - d) / 2)];
           states[i].pos = sub(states[i].pos, push);
@@ -606,7 +616,8 @@ export function solvePose(
       const d = Math.hypot(tj.cx - ti.cx, tj.cz - ti.cz);
       maxPenetration = Math.max(
         maxPenetration,
-        (states[i].rest.bodyRadius + states[j].rest.bodyRadius) * 0.82 - d
+        (states[i].rest.bodyRadius + states[j].rest.bodyRadius) * 0.82 *
+          (torsoContactPairs.has(`${i}:${j}`) ? 0.45 : 1) - d
       );
     }
   }

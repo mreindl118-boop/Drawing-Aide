@@ -1,21 +1,13 @@
 /// <reference lib="webworker" />
-/** Anatomy engine worker: owns the baked morph library and does ALL per-frame
- *  math off the main thread — delta composition, sculpt layer, CPU skinning
- *  for pose preview, normals, measurements. */
-import { BASE_PARAMS, patched } from './params';
-import {
-  buildTopology,
-  generateBody,
-  BONES,
-  BONE_PARENT,
-  TORSO_RADIAL,
-  TORSO_SUBDIV,
-  TORSO_STATION,
-  type Topology
-} from './generate';
+/** Anatomy engine worker on the MakeHuman (CC0) mesh backend: owns the morph
+ *  library and does ALL per-frame math off the main thread — delta
+ *  composition (MH sculpted targets + synthesized bone-space morphs +
+ *  gaussian fields), sculpt layer, CPU pose skinning, normals, cavity and
+ *  painted skin tint, measurements. */
+import { loadMH, type MHData } from './mh/backend';
+import { MH_MAP, type SynthSpec, type MHSource } from './mh/mapping';
 import { MORPHS, type MorphDef } from './catalog';
 import { bakeFields } from './fields';
-import { BASE_DETAIL } from './detail';
 
 interface BakedDir {
   delta: Float32Array;
@@ -23,17 +15,30 @@ interface BakedDir {
 }
 interface BakedMorph {
   def: MorphDef;
-  pos: BakedDir;
+  pos: BakedDir | null;
   neg: BakedDir | null;
 }
 
-let topo: Topology;
+interface Topo {
+  vertCount: number;
+  indices: Uint32Array;
+  uvs: Float32Array;
+  regions: Uint8Array;
+  side: Float32Array;
+  skinIndex: Uint16Array;
+  skinWeight: Float32Array;
+  parts: { name: string; vStart: number; vCount: number; iStart: number; iCount: number }[];
+  landmarkVerts: Record<string, number>;
+}
+
+let mh: MHData;
+let topo: Topo;
 let basePos: Float32Array;
 let baseJoints: Float32Array;
+let BONES: string[];
+let BONE_PARENT: number[];
 let baked = new Map<string, BakedMorph>();
 let landmarkBase: Record<string, [number, number, number]>;
-/** always-on anatomical surface detail (face, clavicles, abs, creases…) */
-let detailDelta: Float32Array;
 
 // scratch buffers (reused every compose)
 let work: Float32Array;
@@ -48,42 +53,302 @@ let cavity: Float32Array;
 let featureTint: Float32Array;
 let tintOut: Float32Array;
 
+// ----------------------------------------------------------- synth morphs
+
+const boneIdx = (name: string): number => BONES.indexOf(name);
+/** distal joint each bone points toward (for girth/length axes) */
+let boneTail: Record<string, [number, number, number]>;
+
+function buildBoneTails(): void {
+  const j = (b: string): [number, number, number] => {
+    const i = boneIdx(b) * 3;
+    return [baseJoints[i], baseJoints[i + 1], baseJoints[i + 2]];
+  };
+  const lm = (n: string): [number, number, number] => {
+    const v = topo.landmarkVerts[n];
+    return [basePos[v * 3], basePos[v * 3 + 1], basePos[v * 3 + 2]];
+  };
+  boneTail = {
+    pelvis: j('spine'), spine: j('chest'), chest: j('neck'), neck: j('head'),
+    head: [j('head')[0], j('head')[1] + 0.15, j('head')[2]],
+    upperArmL: j('forearmL'), forearmL: j('handL'), handL: lm('handTipL'),
+    upperArmR: j('forearmR'), forearmR: j('handR'), handR: lm('handTipR'),
+    thighL: j('shinL'), shinL: j('footL'), footL: lm('toeL'),
+    thighR: j('shinR'), shinR: j('footR'), footR: lm('toeR')
+  };
+}
+
+function boneWeightOf(v: number, set: Set<number>): number {
+  let w = 0;
+  if (set.has(topo.skinIndex[v * 2])) w += topo.skinWeight[v * 2];
+  if (set.has(topo.skinIndex[v * 2 + 1])) w += topo.skinWeight[v * 2 + 1];
+  return w;
+}
+
+function isDescendant(b: number, set: Set<number>): boolean {
+  let cur = b;
+  while (cur >= 0) {
+    if (set.has(cur)) return true;
+    cur = BONE_PARENT[cur];
+  }
+  return false;
+}
+
+/** chain root = most proximal set member above bone b */
+function chainRootOf(b: number, set: Set<number>): number {
+  let cur = b;
+  let root = b;
+  while (cur >= 0) {
+    if (set.has(cur)) root = cur;
+    cur = BONE_PARENT[cur];
+  }
+  return root;
+}
+
+function synthInto(spec: SynthSpec, delta: Float32Array, jointDelta: Float32Array): void {
+  const bc = mh.bodyCount;
+  if (spec.kind === 'band') {
+    const yOf = { waist: 'waistSideL', hip: 'hipSideL', chest: 'bustL' } as const;
+    let yc: number;
+    if (spec.y === 'rib') {
+      yc = (baseJoints[boneIdx('chest') * 3 + 1] + landmarkBase.waistSideL[1]) / 2;
+    } else {
+      yc = landmarkBase[yOf[spec.y]][1];
+    }
+    const zc = baseJoints[boneIdx('spine') * 3 + 2];
+    const s2 = 2 * spec.width * spec.width;
+    for (let v = 0; v < bc; v++) {
+      const r = topo.regions[v];
+      if (r !== 2 && r !== 3 && r !== 4 && r !== 9) continue;
+      const py = basePos[v * 3 + 1];
+      const w = Math.exp(-((py - yc) ** 2) / s2);
+      if (w < 0.01) continue;
+      delta[v * 3] += basePos[v * 3] * spec.amount[0] * w;
+      delta[v * 3 + 2] += (basePos[v * 3 + 2] - zc) * spec.amount[1] * w;
+    }
+    return;
+  }
+  const boneNames = 'bones' in spec ? spec.bones : [spec.bone];
+  const set = new Set<number>(boneNames.map(boneIdx));
+  if (spec.kind === 'shift') {
+    for (let v = 0; v < bc; v++) {
+      const w = boneWeightOf(v, set);
+      if (w < 1e-3) continue;
+      delta[v * 3] += spec.vec[0] * w;
+      delta[v * 3 + 1] += spec.vec[1] * w;
+      delta[v * 3 + 2] += spec.vec[2] * w;
+    }
+    for (let b = 0; b < BONES.length; b++) {
+      if (b !== 0 && isDescendant(b, set) && !set.has(b)) {
+        jointDelta[b * 3] += spec.vec[0];
+        jointDelta[b * 3 + 1] += spec.vec[1];
+        jointDelta[b * 3 + 2] += spec.vec[2];
+      } else if (set.has(b)) {
+        jointDelta[b * 3] += spec.vec[0] * 0.5;
+        jointDelta[b * 3 + 1] += spec.vec[1] * 0.5;
+        jointDelta[b * 3 + 2] += spec.vec[2] * 0.5;
+      }
+    }
+    return;
+  }
+  if (spec.kind === 'scaleAt') {
+    const bi = boneIdx(spec.bone);
+    const jx = baseJoints[bi * 3], jy = baseJoints[bi * 3 + 1], jz = baseJoints[bi * 3 + 2];
+    for (let v = 0; v < bc; v++) {
+      const w = boneWeightOf(v, set);
+      if (w < 1e-3) continue;
+      delta[v * 3] += (basePos[v * 3] - jx) * spec.amount[0] * w;
+      delta[v * 3 + 1] += (basePos[v * 3 + 1] - jy) * spec.amount[1] * w;
+      delta[v * 3 + 2] += (basePos[v * 3 + 2] - jz) * spec.amount[2] * w;
+    }
+    for (let b = 0; b < BONES.length; b++) {
+      if (isDescendant(b, set)) {
+        jointDelta[b * 3] += (baseJoints[b * 3] - jx) * spec.amount[0];
+        jointDelta[b * 3 + 1] += (baseJoints[b * 3 + 1] - jy) * spec.amount[1];
+        jointDelta[b * 3 + 2] += (baseJoints[b * 3 + 2] - jz) * spec.amount[2];
+      }
+    }
+    return;
+  }
+  // girth / length share per-bone axes
+  const axes = new Map<number, { j: [number, number, number]; a: [number, number, number]; len: number; root: number }>();
+  for (const bi of set) {
+    const j: [number, number, number] = [baseJoints[bi * 3], baseJoints[bi * 3 + 1], baseJoints[bi * 3 + 2]];
+    const t = boneTail[BONES[bi]];
+    const a: [number, number, number] = [t[0] - j[0], t[1] - j[1], t[2] - j[2]];
+    const len = Math.hypot(...a) || 1;
+    axes.set(bi, { j, a: [a[0] / len, a[1] / len, a[2] / len], len, root: chainRootOf(bi, set) });
+  }
+  for (let v = 0; v < bc; v++) {
+    const w = boneWeightOf(v, set);
+    if (w < 1e-3) continue;
+    const b0 = topo.skinIndex[v * 2];
+    const bi = set.has(b0) ? b0 : topo.skinIndex[v * 2 + 1];
+    const ax = axes.get(bi);
+    if (!ax) continue;
+    const px = basePos[v * 3] - ax.j[0];
+    const py = basePos[v * 3 + 1] - ax.j[1];
+    const pz = basePos[v * 3 + 2] - ax.j[2];
+    const along = px * ax.a[0] + py * ax.a[1] + pz * ax.a[2];
+    if (spec.kind === 'girth') {
+      delta[v * 3] += (px - along * ax.a[0]) * spec.amount * w;
+      delta[v * 3 + 1] += (py - along * ax.a[1]) * spec.amount * w;
+      delta[v * 3 + 2] += (pz - along * ax.a[2]) * spec.amount * w;
+    } else {
+      // length: stretch along the CHAIN root axis so segments stay connected
+      const root = axes.get(ax.root) ?? ax;
+      const rx = basePos[v * 3] - root.j[0];
+      const ry = basePos[v * 3 + 1] - root.j[1];
+      const rz = basePos[v * 3 + 2] - root.j[2];
+      const rAlong = rx * root.a[0] + ry * root.a[1] + rz * root.a[2];
+      delta[v * 3] += root.a[0] * rAlong * spec.amount * w;
+      delta[v * 3 + 1] += root.a[1] * rAlong * spec.amount * w;
+      delta[v * 3 + 2] += root.a[2] * rAlong * spec.amount * w;
+    }
+  }
+  if (spec.kind === 'length') {
+    for (let b = 0; b < BONES.length; b++) {
+      if (!isDescendant(b, set)) continue;
+      const root = axes.get(chainRootOf(b, set));
+      if (!root) continue;
+      const rx = baseJoints[b * 3] - root.j[0];
+      const ry = baseJoints[b * 3 + 1] - root.j[1];
+      const rz = baseJoints[b * 3 + 2] - root.j[2];
+      const rAlong = rx * root.a[0] + ry * root.a[1] + rz * root.a[2];
+      jointDelta[b * 3] += root.a[0] * rAlong * spec.amount;
+      jointDelta[b * 3 + 1] += root.a[1] * rAlong * spec.amount;
+      jointDelta[b * 3 + 2] += root.a[2] * rAlong * spec.amount;
+    }
+  }
+}
+
+// ------------------------------------------------------------ morph baking
+
+function applySource(src: MHSource, def: MorphDef, dir: 'pos' | 'neg', delta: Float32Array, jointDelta: Float32Array): void {
+  if (src.bundle) {
+    for (const [name, scale] of src.bundle) {
+      const d = mh.deltas.get(name);
+      if (!d) {
+        console.warn(`[mh] missing bundle delta ${name} for ${def.id}`);
+        continue;
+      }
+      for (let k = 0; k < d.idx.length; k++) {
+        const v = d.idx[k];
+        delta[v * 3] += d.dxyz[k * 3] * scale;
+        delta[v * 3 + 1] += d.dxyz[k * 3 + 1] * scale;
+        delta[v * 3 + 2] += d.dxyz[k * 3 + 2] * scale;
+      }
+      for (let i = 0; i < jointDelta.length; i++) jointDelta[i] += d.joints[i] * scale;
+    }
+  }
+  if (src.synth) for (const s of src.synth) synthInto(s, delta, jointDelta);
+  if (src.fields) {
+    const spec = dir === 'pos' ? def.pos : def.neg;
+    if (spec?.fields) bakeFields(spec.fields, basePos, landmarkBase, delta);
+  }
+}
+
 function bakeDir(def: MorphDef, dir: 'pos' | 'neg'): BakedDir | null {
   const spec = dir === 'pos' ? def.pos : def.neg;
-  if (!spec) return null;
+  const map = MH_MAP[def.id]?.[dir];
+  if (!spec && !map) return null;
   const delta = new Float32Array(basePos.length);
   const jointDelta = new Float32Array(baseJoints.length);
-  if (spec.params) {
-    const res = generateBody(patched(BASE_PARAMS, spec.params(BASE_PARAMS)));
-    for (let i = 0; i < delta.length; i++) delta[i] = res.positions[i] - basePos[i];
-    for (let i = 0; i < jointDelta.length; i++) jointDelta[i] = res.joints[i] - baseJoints[i];
-  }
-  if (spec.fields) {
+  let any = false;
+  if (map) {
+    applySource(map, def, dir, delta, jointDelta);
+    any = true;
+  } else if (spec?.fields) {
     bakeFields(spec.fields, basePos, landmarkBase, delta);
+    any = true;
   }
+  if (!any) return null;
   return { delta, jointDelta };
 }
 
-function init(): void {
-  topo = buildTopology();
-  const base = generateBody(BASE_PARAMS);
-  basePos = base.positions;
-  baseJoints = base.joints;
-  landmarkBase = base.landmarks;
-  for (const def of MORPHS) {
-    baked.set(def.id, {
-      def,
-      pos: bakeDir(def, 'pos')!,
-      neg: bakeDir(def, 'neg')
-    });
+async function init(): Promise<void> {
+  mh = await loadMH();
+  basePos = mh.basePos;
+  baseJoints = mh.baseJoints;
+  BONES = mh.bones;
+  BONE_PARENT = mh.boneParent;
+  // derive cap-vertex base positions from their rings
+  deriveCaps(basePos);
+  topo = {
+    vertCount: mh.vertCount,
+    indices: mh.indices,
+    uvs: mh.uvs,
+    regions: mh.regions,
+    side: mh.side,
+    skinIndex: mh.skinIndex,
+    skinWeight: mh.skinWeight,
+    parts: mh.parts,
+    landmarkVerts: mh.landmarkVerts
+  };
+  landmarkBase = {};
+  for (const [name, v] of Object.entries(mh.landmarkVerts)) {
+    landmarkBase[name] = [basePos[v * 3], basePos[v * 3 + 1], basePos[v * 3 + 2]];
   }
-  detailDelta = new Float32Array(basePos.length);
-  bakeFields(BASE_DETAIL, basePos, landmarkBase, detailDelta);
+  buildBoneTails();
+  const dead: string[] = [];
+  for (const def of MORPHS) {
+    const pos = bakeDir(def, 'pos');
+    const neg = bakeDir(def, 'neg');
+    if (!pos && !neg) dead.push(def.id);
+    baked.set(def.id, { def, pos, neg });
+  }
+  if (dead.length) console.warn('[mh] sliders with no MH source (inert):', dead.join(', '));
   work = new Float32Array(basePos.length);
   normals = new Float32Array(basePos.length);
   jointsOut = new Float32Array(baseJoints.length);
   buildAdjacency();
   bakeFeatureTint();
+}
+
+/** cap verts (appended after body verts) = average of their boundary ring */
+function deriveCaps(arr: Float32Array): void {
+  mh.caps.forEach((ring, ci) => {
+    const v = mh.bodyCount + ci;
+    let x = 0, y = 0, z = 0;
+    for (const r of ring) {
+      x += arr[r * 3];
+      y += arr[r * 3 + 1];
+      z += arr[r * 3 + 2];
+    }
+    arr[v * 3] = x / ring.length;
+    arr[v * 3 + 1] = y / ring.length;
+    arr[v * 3 + 2] = z / ring.length;
+  });
+  deriveEyes(arr);
+}
+
+/** eyeball spheres rigidly follow their anchor helper verts (which morph
+ *  targets move): translate with the centroid, scale with the mean radius */
+function deriveEyes(arr: Float32Array): void {
+  if (arr === basePos) return; // base already seats the spheres
+  for (const eye of mh.eyes) {
+    let bx = 0, by = 0, bz = 0, nx = 0, ny = 0, nz = 0;
+    for (let k = 0; k < eye.anchorCount; k++) {
+      const v = eye.anchorStart + k;
+      bx += basePos[v * 3]; by += basePos[v * 3 + 1]; bz += basePos[v * 3 + 2];
+      nx += arr[v * 3]; ny += arr[v * 3 + 1]; nz += arr[v * 3 + 2];
+    }
+    bx /= eye.anchorCount; by /= eye.anchorCount; bz /= eye.anchorCount;
+    nx /= eye.anchorCount; ny /= eye.anchorCount; nz /= eye.anchorCount;
+    let rb = 0, rn = 0;
+    for (let k = 0; k < eye.anchorCount; k++) {
+      const v = eye.anchorStart + k;
+      rb += Math.hypot(basePos[v * 3] - bx, basePos[v * 3 + 1] - by, basePos[v * 3 + 2] - bz);
+      rn += Math.hypot(arr[v * 3] - nx, arr[v * 3 + 1] - ny, arr[v * 3 + 2] - nz);
+    }
+    const s = rb > 1e-9 ? rn / rb : 1;
+    for (let k = 0; k < eye.sphereCount; k++) {
+      const v = eye.sphereStart + k;
+      arr[v * 3] = nx + (basePos[v * 3] - bx) * s;
+      arr[v * 3 + 1] = ny + (basePos[v * 3 + 1] - by) * s;
+      arr[v * 3 + 2] = nz + (basePos[v * 3 + 2] - bz) * s;
+    }
+  }
 }
 
 function buildAdjacency(): void {
@@ -139,7 +404,7 @@ function bakeFeatureTint(): void {
     // vermilion lips: band along the mouth line out to the corners
     if (mouth && cornerL) {
       const ax = Math.abs(basePos[v * 3]);
-      const halfW = cornerL[0] * 1.15;
+      const halfW = Math.abs(cornerL[0]) * 1.15;
       const along = Math.min(1, ax / halfW);
       const dy = basePos[v * 3 + 1] - (mouth[1] + 0.001 - along * along * 0.002);
       const dz = basePos[v * 3 + 2] - mouth[2];
@@ -149,27 +414,69 @@ function bakeFeatureTint(): void {
         mul(v, 1.22, 0.56, 0.5, Math.min(1, w * 0.95));
       }
     }
-    // brow strokes: tilted band riding the brow-bar crest
-    if (browL) {
+    // brow strokes: tilted band just above the socket rim
+    if (browL && eyeL) {
       for (const s of [1, -1]) {
         const bx = browL[0] * s;
         const dx = basePos[v * 3] - bx;
-        const dy = basePos[v * 3 + 1] - (browL[1] + 0.003 + dx * s * 0.18);
+        const dy = basePos[v * 3 + 1] - (Math.max(browL[1], eyeL[1] + 0.014) + dx * s * 0.14);
         const dz = basePos[v * 3 + 2] - browL[2];
-        if (dz > -0.03) {
-          const w = Math.exp(-(dx * dx) / (2 * 0.014 * 0.014)) * Math.exp(-(dy * dy) / (2 * 0.0045 * 0.0045));
-          mul(v, 0.42, 0.35, 0.32, Math.min(1, w * 1.1));
+        if (dz > -0.025 && dz < 0.02) {
+          const w = Math.exp(-(dx * dx) / (2 * 0.013 * 0.013)) * Math.exp(-(dy * dy) / (2 * 0.0032 * 0.0032));
+          mul(v, 0.45, 0.38, 0.35, Math.min(1, w));
         }
       }
     }
     // lash line + soft periorbital shading
     if (eyeL) {
       for (const s of [1, -1]) {
-        const p: [number, number, number] = [eyeL[0] * s, eyeL[1] + 0.0075, eyeL[2]];
-        const w = gauss(d2To(v, p, 1.6, 0.45, 1), 0.006);
-        mul(v, 0.62, 0.58, 0.58, w * 0.7);
+        const p: [number, number, number] = [eyeL[0] * s, eyeL[1] + 0.0065, eyeL[2]];
+        const w = gauss(d2To(v, p, 1.6, 0.4, 1), 0.005);
+        mul(v, 0.62, 0.58, 0.58, w * 0.65);
         const soft = gauss(d2To(v, [eyeL[0] * s, eyeL[1], eyeL[2]], 1.4, 1, 1), 0.014);
-        mul(v, 0.93, 0.9, 0.92, soft * 0.35);
+        mul(v, 0.94, 0.91, 0.93, soft * 0.3);
+      }
+    }
+  }
+  // eyeball parts: sclera, iris ring, pupil (painted around the forward pole)
+  for (const part of topo.parts) {
+    if (part.name !== 'eyeL' && part.name !== 'eyeR') continue;
+    // eyeball center + forward extent
+    let cx = 0, cy = 0, cz = 0, zMax = -Infinity;
+    for (let v = part.vStart; v < part.vStart + part.vCount; v++) {
+      cx += basePos[v * 3];
+      cy += basePos[v * 3 + 1];
+      cz += basePos[v * 3 + 2];
+      if (basePos[v * 3 + 2] > zMax) zMax = basePos[v * 3 + 2];
+    }
+    cx /= part.vCount;
+    cy /= part.vCount;
+    cz /= part.vCount;
+    const R = Math.max(0.004, zMax - cz);
+    for (let v = part.vStart; v < part.vStart + part.vCount; v++) {
+      // angle from the forward (+z) pole
+      const dx = basePos[v * 3] - cx;
+      const dy = basePos[v * 3 + 1] - cy;
+      const dz = basePos[v * 3 + 2] - cz;
+      const len = Math.hypot(dx, dy, dz) || 1;
+      const polar = Math.acos(Math.max(-1, Math.min(1, dz / len))); // 0 at front pole
+      void R;
+      if (polar < 0.22) {
+        featureTint[v * 3] = 0.05; // pupil
+        featureTint[v * 3 + 1] = 0.05;
+        featureTint[v * 3 + 2] = 0.06;
+      } else if (polar < 0.5) {
+        featureTint[v * 3] = 0.28; // iris (dark warm — reads as any eye color)
+        featureTint[v * 3 + 1] = 0.24;
+        featureTint[v * 3 + 2] = 0.2;
+      } else if (polar < 0.58) {
+        featureTint[v * 3] = 0.5; // limbal ring softening
+        featureTint[v * 3 + 1] = 0.5;
+        featureTint[v * 3 + 2] = 0.5;
+      } else {
+        featureTint[v * 3] = 1.55; // sclera: lifted well above skin tone
+        featureTint[v * 3 + 1] = 1.5;
+        featureTint[v * 3 + 2] = 1.45;
       }
     }
   }
@@ -182,7 +489,7 @@ function bakeFeatureTint(): void {
   for (const [name, r, strength] of blush) {
     const p = L[name];
     if (!p) continue;
-    for (const s of p[0] > 1e-6 ? [1, -1] : [1]) {
+    for (const s of Math.abs(p[0]) > 1e-6 ? [1, -1] : [1]) {
       const q: [number, number, number] = [p[0] * s, p[1], p[2]];
       for (let v = 0; v < vc; v++) {
         const w = gauss(d2To(v, q), r) * strength;
@@ -193,8 +500,7 @@ function bakeFeatureTint(): void {
 }
 
 /** Concavity = mean signed elevation of neighbors above the tangent plane:
- *  positive in creases and pits, negative on ridges. The main thread turns
- *  this into crevice darkening on the skin material. */
+ *  positive in creases and pits, negative on ridges. */
 function computeCavity(): void {
   const vc = topo.vertCount;
   for (let v = 0; v < vc; v++) {
@@ -239,7 +545,7 @@ function addDelta(m: BakedMorph, w: number, joints: boolean): void {
 
 function addDeltaSided(m: BakedMorph, l: number, r: number): void {
   const side = topo.side;
-  const pd = m.pos.delta;
+  const pd = m.pos?.delta ?? null;
   const nd = m.neg?.delta ?? null;
   for (let v = 0; v < side.length; v++) {
     const s01 = (side[v] + 1) / 2; // 0 = right, 1 = left
@@ -272,50 +578,70 @@ interface Measurements {
   gated: boolean;
 }
 
-const RING_VERTS = TORSO_RADIAL + 1; // seam vertex duplicated
-
-function ringCircumference(partName: string, station: number): number {
-  const part = topo.parts.find((p) => p.name === partName)!;
-  const ringStart = part.vStart + station * TORSO_SUBDIV * RING_VERTS;
+/** slice circumference at height y: angular-bin the torso outline and sum
+ *  chords — robust on an unstructured mesh */
+const BINS = 48;
+const binR = new Float32Array(BINS);
+let torsoVerts: Uint32Array;
+function sliceCircumference(y: number, halfBand = 0.012): number {
+  if (!torsoVerts) {
+    const list: number[] = [];
+    for (let v = 0; v < mh.bodyCount; v++) {
+      const r = topo.regions[v];
+      if (r === 2 || r === 3 || r === 4 || r === 9) list.push(v);
+    }
+    torsoVerts = new Uint32Array(list);
+  }
+  binR.fill(0);
+  let cx = 0, cz = 0, n = 0;
+  for (const v of torsoVerts) {
+    if (Math.abs(work[v * 3 + 1] - y) > halfBand) continue;
+    cx += work[v * 3];
+    cz += work[v * 3 + 2];
+    n++;
+  }
+  if (n < 8) return 0;
+  cx /= n;
+  cz /= n;
+  for (const v of torsoVerts) {
+    if (Math.abs(work[v * 3 + 1] - y) > halfBand) continue;
+    const dx = work[v * 3] - cx;
+    const dz = work[v * 3 + 2] - cz;
+    const bin = Math.floor(((Math.atan2(dz, dx) + Math.PI) / (2 * Math.PI)) * BINS) % BINS;
+    const rad = Math.hypot(dx, dz);
+    if (rad > binR[bin]) binR[bin] = rad;
+  }
   let len = 0;
-  for (let k = 0; k < RING_VERTS - 1; k++) {
-    const a = (ringStart + k) * 3;
-    const b = (ringStart + k + 1) * 3;
-    len += Math.hypot(work[b] - work[a], work[b + 1] - work[a + 1], work[b + 2] - work[a + 2]);
+  for (let b = 0; b < BINS; b++) {
+    const r0 = binR[b] || binR[(b + BINS - 1) % BINS];
+    const r1 = binR[(b + 1) % BINS] || r0;
+    const a0 = (b / BINS) * 2 * Math.PI;
+    const a1 = ((b + 1) / BINS) * 2 * Math.PI;
+    const x0 = r0 * Math.cos(a0), z0 = r0 * Math.sin(a0);
+    const x1 = r1 * Math.cos(a1), z1 = r1 * Math.sin(a1);
+    len += Math.hypot(x1 - x0, z1 - z0);
   }
   return len;
 }
 
+const lmY = (name: string): number => work[topo.landmarkVerts[name] * 3 + 1];
+const lmX = (name: string): number => work[topo.landmarkVerts[name] * 3];
+
 function measure(): Measurements {
-  const lv = topo.landmarkVerts;
-  const y = (name: string): number => work[lv[name] * 3 + 1];
-  const x = (name: string): number => work[lv[name] * 3];
-  // true head span: y-range of the head part (landmark verts quantize badly)
-  const headPart = topo.parts.find((p) => p.name === 'head')!;
-  let hMin = Infinity;
   let hMax = -Infinity;
-  for (let v = headPart.vStart; v < headPart.vStart + headPart.vCount; v++) {
-    const vy = work[v * 3 + 1];
-    if (vy < hMin) hMin = vy;
-    if (vy > hMax) hMax = vy;
-  }
-  const heelY = Math.min(y('heelL'), y('heelR')) - 0.02;
+  for (let v = 0; v < mh.bodyCount; v++) if (work[v * 3 + 1] > hMax) hMax = work[v * 3 + 1];
+  const heelY = Math.min(lmY('heelL'), lmY('heelR')) - 0.015;
   const height = hMax - Math.min(0, heelY);
-  const headH = Math.max(0.05, hMax - hMin);
-  const shoulderSpan = Math.abs(x('shoulderTipL')) * 2;
-  const thighY = jointsOut[11 * 3 + 1]; // thighL
-  const ankleY = jointsOut[13 * 3 + 1]; // footL
+  const headH = Math.max(0.05, lmY('crown') - lmY('chin') + 0.02);
+  const thighY = jointsOut[BONES.indexOf('thighL') * 3 + 1];
+  const ankleY = jointsOut[BONES.indexOf('footL') * 3 + 1];
   return {
     heightCm: height * 100,
     headUnits: height / headH,
-    shoulderCm: shoulderSpan * 100,
-    chestCm: ringCircumference('torso', TORSO_STATION.chest) * 100,
-    waistCm: ringCircumference('torso', TORSO_STATION.waist) * 100,
-    hipCm:
-      Math.max(
-        ringCircumference('torso', TORSO_STATION.glute),
-        ringCircumference('torso', TORSO_STATION.hip)
-      ) * 100,
+    shoulderCm: Math.abs(lmX('shoulderTipL')) * 2 * 100,
+    chestCm: sliceCircumference(lmY('bustL')) * 100,
+    waistCm: sliceCircumference(lmY('waistSideL')) * 100,
+    hipCm: Math.max(sliceCircumference(lmY('hipSideL')), sliceCircumference(lmY('gluteApex'))) * 100,
     inseamCm: (thighY - ankleY + 0.07) * 100,
     gated: false
   };
@@ -427,7 +753,6 @@ function computeNormals(): void {
 function compose(req: ComposeReq): void {
   const t0 = performance.now();
   work.set(basePos);
-  for (let i = 0; i < work.length; i++) work[i] += detailDelta[i];
   jointsOut.set(baseJoints);
 
   // pass 1: everything except the anatomy module
@@ -454,6 +779,7 @@ function compose(req: ComposeReq): void {
   }
 
   // measurements + child-coded gate BEFORE explicit anatomy is added
+  deriveCaps(work);
   const m = measure();
   let gated = false;
   if (nsfwActive.length) {
@@ -465,6 +791,7 @@ function compose(req: ComposeReq): void {
   }
   m.gated = gated;
 
+  deriveCaps(work);
   if (req.pose && Object.keys(req.pose).length) applyPose(req.pose);
   computeNormals();
   computeCavity();
@@ -505,8 +832,10 @@ function sendDeltas(id: number, includeNsfw: boolean): void {
   for (const m of baked.values()) {
     // anatomy-module targets only ship when the project has the module on
     if (m.def.nsfw && !includeNsfw) continue;
-    names.push(m.def.bipolar ? `${m.def.id}_pos` : m.def.id);
-    arrays.push(m.pos.delta.slice());
+    if (m.pos) {
+      names.push(m.def.bipolar ? `${m.def.id}_pos` : m.def.id);
+      arrays.push(m.pos.delta.slice());
+    }
     if (m.neg) {
       names.push(`${m.def.id}_neg`);
       arrays.push(m.neg.delta.slice());
@@ -518,11 +847,14 @@ function sendDeltas(id: number, includeNsfw: boolean): void {
   );
 }
 
+let initPromise: Promise<void> | null = null;
+
 self.onmessage = (e: MessageEvent) => {
   const msg = e.data;
-  try {
+  const run = async (): Promise<void> => {
     if (msg.type === 'init') {
-      init();
+      initPromise = init();
+      await initPromise;
       const t = topo;
       (self as unknown as Worker).postMessage({
         type: 'ready',
@@ -540,15 +872,18 @@ self.onmessage = (e: MessageEvent) => {
         boneParent: BONE_PARENT.slice()
       });
     } else if (msg.type === 'compose') {
+      await initPromise;
       compose(msg as ComposeReq);
     } else if (msg.type === 'deltas') {
+      await initPromise;
       sendDeltas(msg.id, !!msg.includeNsfw);
     }
-  } catch (err) {
+  };
+  run().catch((err) => {
     (self as unknown as Worker).postMessage({
       type: 'error',
       id: msg.id,
       error: err instanceof Error ? err.message : String(err)
     });
-  }
+  });
 };
