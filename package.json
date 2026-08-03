@@ -13,7 +13,9 @@
     "typecheck": "tsc --noEmit",
     "icons": "node scripts/gen-icons.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "smoke:anatomy": "node scripts/anatomy-smoke.mjs"
+    "smoke:anatomy": "node scripts/anatomy-smoke.mjs",
+    "deploy": "node scripts/deploy.mjs",
+    "smoke:update": "node scripts/update-smoke.mjs"
   },
   "dependencies": {
     "idb": "^8.0.2",
@@ -27,6 +29,7 @@
     "playwright-core": "^1.62.1",
     "typescript": "~5.8.3",
     "vite": "^6.3.5",
-    "vite-plugin-pwa": "^0.21.2"
+    "vite-plugin-pwa": "^0.21.2",
+    "wrangler": "^4.118.0"
   }
 }

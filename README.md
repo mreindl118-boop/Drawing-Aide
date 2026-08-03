@@ -44,6 +44,25 @@ Keys: `W/E/R` gizmo modes · `Tab` cycle tool · `[` `]` size · `S` symmetry ·
 
 In Move mode, dragging empty space orbits (tap empty space to deselect).
 
+## Deploy
+
+```sh
+npm run deploy        # build + publish to Cloudflare Pages + print the URL
+```
+
+One-time setup: `npx wrangler login` (or set `CLOUDFLARE_API_TOKEN` +
+`CLOUDFLARE_ACCOUNT_ID`). The script creates the Pages project on first run
+(`SCULPTPAD_PAGES_PROJECT` overrides the name). Cache policy ships in
+`public/_headers`: hashed assets immutable, `sw.js`/`index.html` no-cache.
+
+**Updates:** the service worker registers in `prompt` mode — the app never
+hard-reloads mid-edit. Update checks run at launch, whenever the (suspended)
+iPad PWA returns to the foreground, and every 30 minutes; a waiting version
+shows a "New version ready — Restart" toast (deferred while a stroke,
+transform, or export is in flight) that flushes autosave before reloading.
+Current version + build date live in Settings (gear icon) with a manual
+check button. The whole loop is regression-tested by `npm run smoke:update`.
+
 ## Development
 
 ```sh

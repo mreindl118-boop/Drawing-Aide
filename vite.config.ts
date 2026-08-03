@@ -1,10 +1,14 @@
 import { defineConfig, type PluginOption } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import { readFileSync } from 'node:fs';
+
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
 export default defineConfig(async () => {
   const plugins: PluginOption[] = [
     VitePWA({
-      registerType: 'autoUpdate',
+      // 'prompt': never hard-reload mid-edit — the app shows a Restart toast
+      registerType: 'prompt',
       includeAssets: ['icons/*.png', 'icons/*.svg'],
       manifest: {
         name: 'SculptPad',
@@ -17,6 +21,7 @@ export default defineConfig(async () => {
         icons: [
           { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+          { src: 'icons/icon-maskable-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
           { src: 'icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
         ]
       },
@@ -37,6 +42,10 @@ export default defineConfig(async () => {
 
   return {
     plugins,
+    define: {
+      __APP_VERSION__: JSON.stringify(pkg.version as string),
+      __BUILD_DATE__: JSON.stringify(new Date().toISOString())
+    },
     worker: { format: 'es' as const },
     build: { target: 'es2022', sourcemap: false },
     optimizeDeps: { exclude: ['manifold-3d'] }

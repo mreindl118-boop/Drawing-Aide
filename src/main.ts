@@ -1,12 +1,25 @@
 import './style.css';
-import { registerSW } from 'virtual:pwa-register';
 import { renderGallery } from './gallery/gallery';
+import { updateManager } from './app/updates';
 import type { Editor } from './editor/editor';
-
-registerSW({ immediate: true });
 
 const app = document.getElementById('app')!;
 let editor: Editor | null = null;
+
+// prompt-style SW updates: checks on launch / foreground / every 30 min,
+// Restart toast defers while the user is mid-gesture, saves flush first
+const updates = updateManager();
+updates.host = {
+  isBusy: () => editor?.busy ?? false,
+  flushSaves: async () => {
+    if (editor) await editor.saveNow(true);
+  }
+};
+(window as unknown as Record<string, unknown>).__sculptpadUpdates = updates;
+(window as unknown as Record<string, unknown>).__sculptpadVersion = {
+  version: __APP_VERSION__,
+  builtAt: __BUILD_DATE__
+};
 
 async function route(): Promise<void> {
   const hash = location.hash;

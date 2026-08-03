@@ -24,6 +24,7 @@ import { EdgeSlider, SidePanel, el, iconBtn, segmented, shortcutOverlay, sliderR
 import { FigureManager, figureExportParts, splitFigureParts } from '../anatomy/integration';
 import { AnatomyEngine } from '../anatomy/engine';
 import { cloneCharacter } from '../anatomy/character';
+import { updateManager, versionInfo } from '../app/updates';
 
 type Tool = 'move' | 'draw' | 'boolean';
 
@@ -230,8 +231,9 @@ export class Editor {
     }
     this.matcapBtn = iconBtn('matcap', 'Matcap (M)', () => this.toggleMatcap());
     const help = iconBtn('help', 'Shortcuts (?)', () => document.body.appendChild(shortcutOverlay()));
+    const gear = iconBtn('gear', 'Settings', () => this.openSettingsPanel());
     const share = iconBtn('share', 'Export', () => this.openExportPanel());
-    right.append(this.mirrorBtn, this.mirrorAxisWrap, this.matcapBtn, help, share);
+    right.append(this.mirrorBtn, this.mirrorAxisWrap, this.matcapBtn, help, gear, share);
 
     bar.append(left, mid, right);
     this.root.appendChild(bar);
@@ -1161,6 +1163,7 @@ export class Editor {
         return;
       }
       const t = toast('Exporting…', { spinner: true, timeout: 0 });
+      this.exporting = true;
       try {
         const base = this.meta.name.replace(/[^\w-]+/g, '_') || 'sculptpad';
         let blob: Blob;
@@ -1190,11 +1193,50 @@ export class Editor {
       } catch (err) {
         t.close();
         toast(`Export failed: ${err instanceof Error ? err.message : err}`, { timeout: 3500 });
+      } finally {
+        this.exporting = false;
       }
     };
 
     this.panel.show('Export', content);
   }
+
+  // --------------------------------------------------------------- settings
+
+  private openSettingsPanel(): void {
+    const content = el('div');
+    const info = versionInfo();
+    const built = new Date(info.builtAt);
+    content.appendChild(el('p', 'panel-note', `SculptPad v${info.version}`));
+    content.appendChild(
+      el('p', 'panel-note', `Built ${built.toLocaleDateString()} ${built.toLocaleTimeString()}`)
+    );
+    const checkBtn = el('button', 'ghost-btn', 'Check for updates');
+    checkBtn.addEventListener('click', () => void updateManager().check(true));
+    content.appendChild(checkBtn);
+    content.appendChild(
+      el(
+        'p',
+        'panel-note',
+        'On iPad: open in Safari → Share → Add to Home Screen for the fullscreen app. Updates install on restart via the toast.'
+      )
+    );
+    this.panel.show('Settings', content);
+  }
+
+  /** True while an interaction is mid-flight — used to defer the update toast. */
+  get busy(): boolean {
+    return (
+      this.quickshape.isActive ||
+      this.drag !== null ||
+      this.gizmo.dragging ||
+      this.figureHandleStroke ||
+      this.emptyStroke !== null ||
+      this.exporting
+    );
+  }
+
+  private exporting = false;
 
   // ------------------------------------------------------------ undo / redo
 

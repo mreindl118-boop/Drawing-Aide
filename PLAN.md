@@ -48,6 +48,18 @@ Legend: `[x]` implemented · `[ ]` open · **(iPad)** = must be verified on-devi
 - [x] iPad delivery: Web Share API → share sheet (Files/Procreate); download fallback on desktop
 - [ ] STL auto voxel-remesh fallback when non-manifold (needs the Phase 2 remesh pipeline; Phase 1 warns and exports as-is)
 
+### Deploy & auto-update
+- [x] `npm run deploy` = build → Cloudflare Pages publish → URL printed (wrangler; one-time `wrangler login`)
+- [x] Cache headers via `public/_headers`: hashed assets immutable, `sw.js`/`index.html`/manifest no-cache
+- [x] Manifest complete: standalone, theme/background colors, 192/512 + maskable 192/512 icons; iOS 180px apple-touch-icon + status-bar meta
+- [x] SW `registerType: 'prompt'` — no hard reload mid-edit
+- [x] Update checks: launch, `visibilitychange` → foreground (iOS suspend path), every 30 min
+- [x] Non-blocking "Restart" toast, suppressed while stroke/transform/export in flight; autosave flushed before reload (verified end-to-end by `npm run smoke:update`)
+- [x] Settings panel: version + build date (build-time injected), manual update check; version also in gallery footer
+- [ ] **(needs account)** run `wrangler login` once, then `npm run deploy` — verify the printed URL serves the app
+- [ ] **(iPad)** Add to Home Screen from the deployed URL → fullscreen standalone, safe areas respected
+- [ ] **(iPad)** bump version, redeploy, foreground the installed app → toast within seconds → Restart keeps the open project
+
 ### Verification (blocks Phase 2)
 - [ ] **(iPad)** Install as PWA from Safari; relaunch offline; autosave survives
 - [ ] **(iPad)** All gestures verified: orbit/pinch/twist/pan, 2/3-finger tap undo/redo, palm rejection

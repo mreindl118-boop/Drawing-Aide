@@ -115,6 +115,7 @@ function drawIcon(size, { pad = 0.14, bgRadius = 0.22, maskable = false } = {}) 
 
 writeFileSync(join(outDir, 'icon-192.png'), drawIcon(192));
 writeFileSync(join(outDir, 'icon-512.png'), drawIcon(512));
+writeFileSync(join(outDir, 'icon-maskable-192.png'), drawIcon(192, { maskable: true }));
 writeFileSync(join(outDir, 'icon-maskable-512.png'), drawIcon(512, { maskable: true }));
 writeFileSync(join(outDir, 'apple-touch-icon.png'), drawIcon(180, { maskable: true }));
 console.log('icons written to', outDir);

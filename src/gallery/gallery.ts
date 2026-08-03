@@ -17,6 +17,17 @@ export async function renderGallery(root: HTMLElement): Promise<void> {
 
   const projects = await listProjects();
 
+  const foot = el('div', 'gallery-foot');
+  const { versionInfo, updateManager } = await import('../app/updates');
+  const info = versionInfo();
+  foot.appendChild(
+    el('span', '', `v${info.version} · built ${new Date(info.builtAt).toLocaleDateString()}`)
+  );
+  const check = el('button', 'gallery-check', 'Check for updates');
+  check.addEventListener('click', () => void updateManager().check(true));
+  foot.appendChild(check);
+  root.appendChild(foot);
+
   const newCard = el('button', 'project-card new-card');
   newCard.innerHTML = `<div class="new-plus">${ICONS.plus}</div><span>New project</span>`;
   newCard.addEventListener('click', async () => {
