@@ -50,6 +50,12 @@ export const B = Object.fromEntries(BONES.map((n, i) => [n, i])) as Record<
   number
 >;
 
+/** loft resolutions — the worker's ring-measurement math depends on these */
+export const TORSO_RADIAL = 44;
+export const TORSO_SUBDIV = 4;
+/** torso station indices (bottom→top) used for circumference measurements */
+export const TORSO_STATION = { glute: 1, hip: 2, waist: 4, chest: 7 } as const;
+
 export interface Topology {
   vertCount: number;
   indices: Uint32Array;
@@ -86,15 +92,31 @@ function se(c: number, n: number): number {
   return Math.sign(c) * Math.pow(Math.abs(c), 2 / n);
 }
 
-function cr(p0: number, p1: number, p2: number, p3: number, t: number): number {
+/** Monotone cubic (Fritsch–Carlson) through station values: C1-smooth like
+ *  Catmull-Rom but never overshoots, so dense rings can't pinch or fold the
+ *  loft between unevenly spaced stations. */
+function monoInterp(vals: number[], seg: number, t: number): number {
+  const n = vals.length;
+  const d = (i: number): number => vals[Math.min(n - 1, i + 1)] - vals[Math.max(0, i)];
+  const slope = (i: number): number => {
+    if (i <= 0) return d(0);
+    if (i >= n - 1) return d(n - 2);
+    const a = d(i - 1);
+    const b = d(i);
+    if (a * b <= 0) return 0;
+    return (2 * a * b) / (a + b); // harmonic mean, sign-safe
+  };
+  const y0 = vals[seg];
+  const y1 = vals[Math.min(n - 1, seg + 1)];
+  const m0 = slope(seg);
+  const m1 = slope(seg + 1);
   const t2 = t * t;
   const t3 = t2 * t;
   return (
-    0.5 *
-    (2 * p1 +
-      (-p0 + p2) * t +
-      (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
-      (-p0 + 3 * p1 - 3 * p2 + p3) * t3)
+    (2 * t3 - 3 * t2 + 1) * y0 +
+    (t3 - 2 * t2 + t) * m0 +
+    (-2 * t3 + 3 * t2) * y1 +
+    (t3 - t2) * m1
   );
 }
 
@@ -165,12 +187,19 @@ class Emitter {
 
   quad(a: number, b: number, c: number, d: number): void {
     if (!this.record) return;
-    this.indices.push(a, b, d, b, c, d);
+    // outward (CCW) winding for the ring frames this generator emits
+    this.indices.push(a, d, b, b, d, c);
   }
 
   tri(a: number, b: number, c: number): void {
-    if (this.record) this.indices.push(a, b, c);
+    if (this.record) this.indices.push(a, c, b);
   }
+}
+
+interface LoftOpts {
+  /** rounded end caps: dome height in meters (0 = flat fan) */
+  startDome?: number;
+  endDome?: number;
 }
 
 /** Loft closed tube through stations. `ref` orients ring frames.
@@ -182,31 +211,35 @@ function loft(
   radial: number,
   subdiv: number,
   ref: V3,
-  vScale = 1
+  opts: LoftOpts = {}
 ): void {
   em.beginPart();
   const nS = stations.length;
   const ringsN = (nS - 1) * subdiv + 1;
-  const S = (i: number): Station => stations[Math.max(0, Math.min(nS - 1, i))];
   const rings: number[][] = [];
   const centers: V3[] = [];
 
-  // interpolate stations
+  // interpolate stations (monotone cubic — dense rings must never fold)
+  const chan = (get: (s: Station) => number): number[] => stations.map(get);
+  const px = chan((s) => s.p[0]);
+  const py = chan((s) => s.p[1]);
+  const pz = chan((s) => s.p[2]);
+  const ws = chan((s) => s.w);
+  const dfs = chan((s) => s.df);
+  const dbs = chan((s) => s.db);
+  const ns = chan((s) => s.n);
   const interp: Station[] = [];
   for (let seg = 0; seg < nS - 1; seg++) {
     for (let j = 0; j < subdiv; j++) {
       const t = j / subdiv;
-      const a = S(seg - 1), b = S(seg), c = S(seg + 1), d = S(seg + 2);
+      const b = stations[seg];
+      const c = stations[seg + 1];
       interp.push({
-        p: [
-          cr(a.p[0], b.p[0], c.p[0], d.p[0], t),
-          cr(a.p[1], b.p[1], c.p[1], d.p[1], t),
-          cr(a.p[2], b.p[2], c.p[2], d.p[2], t)
-        ],
-        w: cr(a.w, b.w, c.w, d.w, t),
-        df: cr(a.df, b.df, c.df, d.df, t),
-        db: cr(a.db, b.db, c.db, d.db, t),
-        n: cr(a.n, b.n, c.n, d.n, t),
+        p: [monoInterp(px, seg, t), monoInterp(py, seg, t), monoInterp(pz, seg, t)],
+        w: monoInterp(ws, seg, t),
+        df: monoInterp(dfs, seg, t),
+        db: monoInterp(dbs, seg, t),
+        n: monoInterp(ns, seg, t),
         region: b.region,
         b0: b.b0,
         b1: b.b1,
@@ -216,16 +249,26 @@ function loft(
   }
   interp.push(stations[nS - 1]);
 
+  const framesAcc: { x: V3; z: V3 }[] = [];
+  // overall loft direction guards ring frames against tangent flips
+  const first = stations[0].p;
+  const last = stations[nS - 1].p;
+  const overall = norm([last[0] - first[0], last[1] - first[1], last[2] - first[2]]);
+
   for (let r = 0; r < ringsN; r++) {
     const st = interp[r];
     centers.push(st.p);
     // frame from tangent
     const prev = interp[Math.max(0, r - 1)].p;
     const next = interp[Math.min(ringsN - 1, r + 1)].p;
-    const tan = norm([next[0] - prev[0], next[1] - prev[1], next[2] - prev[2]]);
+    let tan = norm([next[0] - prev[0], next[1] - prev[1], next[2] - prev[2]]);
+    if (tan[0] * overall[0] + tan[1] * overall[1] + tan[2] * overall[2] < 0.25) {
+      tan = overall;
+    }
     const xDir = norm(cross(tan, ref));
     const zDir = norm(cross(xDir, tan));
     const ring: number[] = [];
+    framesAcc.push({ x: xDir, z: zDir });
     for (let k = 0; k <= radial; k++) {
       const th = (k / radial) * Math.PI * 2;
       const fx = se(Math.cos(th), st.n);
@@ -236,7 +279,7 @@ function loft(
       const y = st.p[1] + xDir[1] * rx + zDir[1] * rz;
       const z = st.p[2] + xDir[2] * rx + zDir[2] * rz;
       ring.push(
-        em.vert(x, y, z, k / radial, (r / (ringsN - 1)) * vScale, st.region, st.b0, st.b1, st.bt)
+        em.vert(x, y, z, k / radial, r / (ringsN - 1), st.region, st.b0, st.b1, st.bt)
       );
     }
     rings.push(ring);
@@ -246,16 +289,66 @@ function loft(
       em.quad(rings[r][k], rings[r][k + 1], rings[r + 1][k + 1], rings[r + 1][k]);
     }
   }
-  // caps
-  const capFan = (ring: number[], center: V3, st: Station, flip: boolean): void => {
-    const c = em.vert(center[0], center[1], center[2], 0.5, flip ? 0 : 1, st.region, st.b0, st.b1, st.bt);
+
+  // caps: rounded dome (extra shrunk ring + apex) or flat fan
+  const cap = (atStart: boolean, domeH: number): void => {
+    const i = atStart ? 0 : ringsN - 1;
+    const ring = rings[i];
+    const st = interp[i];
+    const center = centers[i];
+    const frame = framesAcc[i];
+    const nb = centers[atStart ? 1 : ringsN - 2];
+    const out = norm([center[0] - nb[0], center[1] - nb[1], center[2] - nb[2]]);
+    const mkRing = (scaleR: number, off: number): number[] => {
+      const rr: number[] = [];
+      for (let k = 0; k <= radial; k++) {
+        const th = (k / radial) * Math.PI * 2;
+        const fx = se(Math.cos(th), st.n) * st.w * scaleR;
+        const fz0 = se(Math.sin(th), st.n);
+        const fz = fz0 * (fz0 >= 0 ? st.df : st.db) * scaleR;
+        rr.push(
+          em.vert(
+            center[0] + frame.x[0] * fx + frame.z[0] * fz + out[0] * off,
+            center[1] + frame.x[1] * fx + frame.z[1] * fz + out[1] * off,
+            center[2] + frame.x[2] * fx + frame.z[2] * fz + out[2] * off,
+            0.5,
+            atStart ? 0 : 1,
+            st.region,
+            st.b0,
+            st.b1,
+            st.bt
+          )
+        );
+      }
+      return rr;
+    };
+    let lastRing = ring;
+    if (domeH > 0) {
+      const mid = mkRing(0.62, domeH * 0.62);
+      for (let k = 0; k < radial; k++) {
+        if (atStart) em.quad(mid[k], mid[k + 1], ring[k + 1], ring[k]);
+        else em.quad(ring[k], ring[k + 1], mid[k + 1], mid[k]);
+      }
+      lastRing = mid;
+    }
+    const apex = em.vert(
+      center[0] + out[0] * domeH,
+      center[1] + out[1] * domeH,
+      center[2] + out[2] * domeH,
+      0.5,
+      atStart ? 0 : 1,
+      st.region,
+      st.b0,
+      st.b1,
+      st.bt
+    );
     for (let k = 0; k < radial; k++) {
-      if (flip) em.tri(c, ring[k + 1], ring[k]);
-      else em.tri(c, ring[k], ring[k + 1]);
+      if (atStart) em.tri(apex, lastRing[k + 1], lastRing[k]);
+      else em.tri(apex, lastRing[k], lastRing[k + 1]);
     }
   };
-  capFan(rings[0], centers[0], interp[0], true);
-  capFan(rings[ringsN - 1], centers[ringsN - 1], interp[ringsN - 1], false);
+  cap(true, opts.startDome ?? 0);
+  cap(false, opts.endDome ?? 0);
   em.endPart(name);
 }
 
@@ -302,14 +395,16 @@ export function emitBody(P: GenParams, em: Emitter): {
       st([0, P.navelY, P.waistZ], (P.waistW + P.hipW) / 2, (P.waistDf + P.hipDf) / 2 * P.bellyRound, (P.waistDb + P.hipDb) / 2, P.waistN, REGION.waist, B.pelvis, B.spine, 0.6),
       st([0, P.waistY, P.waistZ], P.waistW, P.waistDf * P.bellyRound, P.waistDb, P.waistN, REGION.waist, B.spine),
       st([0, (P.waistY + P.chestY) / 2, P.waistZ * 0.5], P.ribW, P.ribDf, P.ribDb, P.torsoN, REGION.chest, B.spine, B.chest, 0.5),
+      st([0, P.chestY - 0.05, P.chestZ * 0.7], (P.ribW + P.chestW) / 2, ((P.ribDf + P.chestDf) / 2) * 0.97, (P.ribDb + P.chestDb) / 2, P.torsoN, REGION.chest, B.chest),
       st([0, P.chestY, P.chestZ], P.chestW, P.chestDf, P.chestDb, P.torsoN, REGION.chest, B.chest),
       st([0, P.upperChestY, P.upperChestZ], P.upperChestW, P.upperChestDf, P.upperChestDb, P.torsoN, REGION.chest, B.chest),
-      st([0, P.shoulderY, P.upperChestZ], P.upperChestW * 0.9, P.upperChestDf * 0.9, P.upperChestDb * 0.9, P.torsoN - 0.2, REGION.shoulders, B.chest),
+      st([0, P.shoulderY, P.upperChestZ], P.upperChestW * 1.04, P.upperChestDf * 0.92, P.upperChestDb * 0.92, P.torsoN - 0.15, REGION.shoulders, B.chest),
       st([0, neckTopTorso, P.neckZ], P.neckR * 1.5, P.neckR * 1.5, P.neckR * 1.5, 2, REGION.shoulders, B.chest)
     ],
-    32,
-    3,
-    [0, 0, 1]
+    TORSO_RADIAL,
+    TORSO_SUBDIV,
+    [0, 0, 1],
+    { startDome: 0.012, endDome: 0.008 }
   );
   landmarks.waistSideL = [P.waistW, P.waistY, P.waistZ];
   landmarks.hipSideL = [P.hipW, hipTopY, 0];
@@ -327,11 +422,11 @@ export function emitBody(P: GenParams, em: Emitter): {
     em,
     'neck',
     [
-      st([0, P.neckBaseY - 0.02, P.neckZ], P.neckR * 1.15, P.neckR * 1.15, P.neckR * 1.2, 2, REGION.neck, B.neck),
-      st([0, P.neckBaseY + 0.02, P.neckZ], P.neckR, P.neckR, P.neckR, 2, REGION.neck, B.neck),
-      st([0, P.headBaseY + 0.015, P.neckZ + 0.005], P.neckR * 1.05, P.neckR * 1.05, P.neckR * 1.1, 2, REGION.neck, B.neck, B.head, 0.7)
+      st([0, P.neckBaseY - 0.025, P.neckZ], P.neckR * 1.1, P.neckR * 1.12, P.neckR * 1.22, 2.1, REGION.neck, B.neck),
+      st([0, P.neckBaseY + 0.02, P.neckZ], P.neckR * 0.96, P.neckR * 0.94, P.neckR * 1.02, 2, REGION.neck, B.neck),
+      st([0, P.headBaseY + 0.06, P.neckZ + 0.006], P.neckR * 0.78, P.neckR * 0.76, P.neckR * 0.84, 2, REGION.neck, B.neck, B.head, 0.7)
     ],
-    16,
+    18,
     3,
     [0, 0, 1]
   );
@@ -345,18 +440,20 @@ export function emitBody(P: GenParams, em: Emitter): {
     em,
     'head',
     [
-      st([0, hb - P.chinDrop, hz + 0.015], P.jawW * 0.55, P.jawDf * 0.5, P.headDb * 0.5, 2.6, REGION.face, B.head),
-      st([0, hb + 0.02, hz + 0.008], P.jawW, P.jawDf, P.headDb * 0.8, 2.3, REGION.face, B.head),
-      st([0, hb + 0.062, hz], P.headW * 0.93, P.headDf * 0.95, P.headDb * 0.92, P.craniumN, REGION.face, B.head),
-      st([0, hb + 0.1, hz], P.headW, P.headDf, P.headDb, P.craniumN, REGION.face, B.head),
-      st([0, hb + 0.135, hz - 0.004], P.headW * 0.97, P.headDf * 0.93, P.headDb, P.craniumN, REGION.face, B.head),
-      st([0, P.crownY - 0.018, hz - 0.01], P.headW * 0.72, P.headDf * 0.68, P.headDb * 0.72, 2.1, REGION.face, B.head)
+      st([0, hb - P.chinDrop, hz + 0.002], P.jawW * 0.96, P.jawDf * 0.92, P.headDb * 0.74, 2.0, REGION.face, B.head),
+      st([0, hb + 0.018, hz + 0.006], P.jawW, P.jawDf, P.headDb * 0.76, 2.0, REGION.face, B.head),
+      st([0, hb + 0.048, hz + 0.003], P.jawW * 1.07, P.jawDf * 1.03, P.headDb * 0.85, 1.98, REGION.face, B.head),
+      st([0, hb + 0.078, hz], P.headW * 0.93, P.headDf * 0.97, P.headDb * 0.93, P.craniumN, REGION.face, B.head),
+      st([0, hb + 0.108, hz], P.headW, P.headDf, P.headDb, P.craniumN, REGION.face, B.head),
+      st([0, hb + 0.145, hz - 0.003], P.headW * 0.99, P.headDf * 0.9, P.headDb * 1.02, P.craniumN, REGION.face, B.head),
+      st([0, P.crownY - 0.02, hz - 0.012], P.headW * 0.8, P.headDf * 0.72, P.headDb * 0.8, 2.05, REGION.face, B.head)
     ],
-    32,
-    3,
-    [0, 0, 1]
+    52,
+    6,
+    [0, 0, 1],
+    { startDome: 0.014, endDome: 0.022 }
   );
-  const eyeY = hb + 0.1;
+  const eyeY = hb + 0.108;
   landmarks.crown = [0, P.crownY, hz - 0.01];
   landmarks.chin = [0, hb - P.chinDrop, hz + 0.015 + P.jawDf * 0.4];
   landmarks.noseTip = [0, eyeY - 0.028, hz + P.headDf];
@@ -364,14 +461,14 @@ export function emitBody(P: GenParams, em: Emitter): {
   landmarks.eyeL = [P.headW * 0.42, eyeY, hz + P.headDf * 0.88];
   landmarks.cheekL = [P.headW * 0.8, eyeY - 0.035, hz + P.headDf * 0.45];
   landmarks.jawSideL = [P.jawW, hb + 0.02, hz + 0.008];
-  landmarks.mouth = [0, hb + 0.045, hz + P.jawDf * 1.02];
+  landmarks.mouth = [0, hb + 0.048, hz + P.jawDf * 1.05];
   landmarks.earL = [P.headW, eyeY - 0.012, hz - 0.012];
   landmarks.foreheadC = [0, hb + 0.14, hz + P.headDf * 0.9];
 
   // ------------------------------------------------------------------- arms
   for (const sgn of [1, -1]) {
     const side = sgn === 1 ? 'L' : 'R';
-    const sh: V3 = [sgn * P.shoulderHalf, P.shoulderY - 0.012, P.upperChestZ];
+    const sh: V3 = [sgn * P.shoulderHalf, P.shoulderY - 0.028, P.upperChestZ];
     const dir: V3 = norm([sgn * Math.sin(P.armAbduct), -Math.cos(P.armAbduct), 0]);
     const elbow: V3 = [sh[0] + dir[0] * P.upperArmLen, sh[1] + dir[1] * P.upperArmLen, sh[2] + 0.008];
     const fDir: V3 = norm([sgn * Math.sin(P.armAbduct * 0.8), -Math.cos(P.armAbduct * 0.8), 0.06]);
@@ -391,14 +488,14 @@ export function emitBody(P: GenParams, em: Emitter): {
       em,
       `arm${side}`,
       [
-        st([sh[0] - dir[0] * 0.03, sh[1] - dir[1] * 0.03, sh[2]], P.upperArmR * 1.3, P.upperArmR * 1.3, P.upperArmR * 1.3, 2, REGION.shoulders, bU),
+        st([sh[0] - dir[0] * 0.05, sh[1] - dir[1] * 0.05, sh[2]], P.upperArmR * 1.34, P.upperArmR * 1.34, P.upperArmR * 1.34, 2, REGION.shoulders, bU),
         st(mid(sh, elbow, 0.4), P.upperArmR, P.upperArmR * 1.05, P.upperArmR, 2.05, REGION.arms, bU),
         st(elbow, P.elbowR, P.elbowR, P.elbowR * 1.05, 2.1, REGION.arms, bU, bF, 0.5),
         st(mid(elbow, wrist, 0.35), P.forearmR, P.forearmR, P.forearmR, 2.05, REGION.arms, bF),
         st(wrist, P.wristR, P.wristR * 0.85, P.wristR * 0.85, 2.2, REGION.arms, bF)
       ],
-      16,
-      3,
+      20,
+      4,
       [0, 0, 1]
     );
     landmarks[`elbow${side}`] = elbow;
@@ -426,7 +523,8 @@ export function emitBody(P: GenParams, em: Emitter): {
       ],
       12,
       3,
-      [0, 0, 1]
+      [0, 0, 1],
+      { endDome: 0.005 }
     );
     const fingerLens = [0.82, 1, 0.94, 0.78];
     for (let f = 0; f < 4; f++) {
@@ -448,7 +546,8 @@ export function emitBody(P: GenParams, em: Emitter): {
         ],
         8,
         2,
-        [0, 0, 1]
+        [0, 0, 1],
+        { endDome: 0.005 }
       );
     }
     // thumb
@@ -466,7 +565,8 @@ export function emitBody(P: GenParams, em: Emitter): {
       ],
       8,
       2,
-      [0, 0, 1]
+      [0, 0, 1],
+      { endDome: 0.005 }
     );
     landmarks[`handTip${side}`] = [
       knuckle[0] + hDir[0] * P.fingerLen,
@@ -489,7 +589,7 @@ export function emitBody(P: GenParams, em: Emitter): {
       em,
       `leg${side}`,
       [
-        st([hipS[0], hipS[1] + 0.1, 0], P.thighR * 1.02, P.thighDf * 1.02, P.thighDb * 1.05, P.limbN + 0.3, REGION.legs, bT),
+        st([hipS[0], hipS[1] + 0.06, 0], P.thighR * 0.93, P.thighDf * 0.96, P.thighDb * 1.0, P.limbN + 0.35, REGION.legs, bT),
         st([hipS[0], hipS[1] - 0.06, 0.002], P.thighR, P.thighDf, P.thighDb, P.limbN + 0.15, REGION.legs, bT),
         st([sgn * P.legSpread * 0.96, (P.hipY + P.kneeY) / 2, 0.004], P.thighR * 0.82, P.thighDf * 0.85, P.thighDb * 0.82, P.limbN, REGION.legs, bT),
         st(knee, P.kneeR, P.kneeR, P.kneeR * 0.95, P.limbN, REGION.legs, bT, bS, 0.5),
@@ -497,9 +597,10 @@ export function emitBody(P: GenParams, em: Emitter): {
         st([sgn * P.legSpread * 0.9, (calfY + P.ankleY) / 2, -0.006], P.calfR * 0.72, P.calfR * 0.68, P.calfR * 0.75, P.limbN, REGION.legs, bS),
         st(ankle, P.ankleR, P.ankleR, P.ankleR * 1.05, P.limbN, REGION.legs, bS)
       ],
-      16,
-      3,
-      [0, 0, 1]
+      22,
+      4,
+      [0, 0, 1],
+      { startDome: 0.022, endDome: 0.012 }
     );
     landmarks[`thighSide${side}`] = [sgn * (P.legSpread + P.thighR), P.hipY - 0.05, 0];
     landmarks[`calf${side}`] = [sgn * P.legSpread * 0.92, calfY, -P.calfR * 0.9 - P.calfBack];
@@ -521,8 +622,9 @@ export function emitBody(P: GenParams, em: Emitter): {
         st([fx + sgn * 0.008, P.footH * 0.32, P.footLen - 0.075], P.footW, P.footH * 0.22, P.footH * 0.32, 2.8, REGION.feet, bFt)
       ],
       16,
-      2,
-      [0, 1, 0]
+      3,
+      [0, 1, 0],
+      { startDome: 0.01, endDome: 0.012 }
     );
     landmarks[`toe${side}`] = [fx, P.footH * 0.3, P.footLen - 0.06];
     landmarks[`heel${side}`] = [fx, P.footH * 0.4, -0.075];
@@ -532,9 +634,9 @@ export function emitBody(P: GenParams, em: Emitter): {
   // A small closed capsule nested inside the pelvis at neutral; the anatomy
   // module's morphs translate/scale it outward. Same topology always present.
   {
-    const gz = P.pelvisZ + P.pelvisDf * 0.35 + P.groinOut;
-    const gy = crotchY + 0.02;
-    const s = 0.032 * P.groinScale;
+    const gz = P.pelvisZ + P.pelvisDf * 0.08 + P.groinOut;
+    const gy = crotchY + 0.045;
+    const s = 0.026 * P.groinScale;
     loft(
       em,
       'groin',

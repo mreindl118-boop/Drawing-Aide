@@ -139,8 +139,8 @@ export const BASE_PARAMS: GenParams = {
   upperChestDf: 0.1,
   upperChestDb: 0.098,
   shoulderHalf: 0.215,
-  torsoN: 2.4,
-  waistN: 2.2,
+  torsoN: 2.25,
+  waistN: 2.1,
 
   pelvisZ: 0.0,
   waistZ: 0.008,
@@ -151,14 +151,14 @@ export const BASE_PARAMS: GenParams = {
 
   neckR: 0.056,
   headW: 0.078,
-  headDf: 0.098,
+  headDf: 0.094,
   headDb: 0.092,
   jawW: 0.062,
-  jawDf: 0.088,
+  jawDf: 0.085,
   chinDrop: 0.012,
-  craniumN: 2.1,
+  craniumN: 1.98,
 
-  armAbduct: 0.42,
+  armAbduct: 0.3,
   upperArmLen: 0.31,
   forearmLen: 0.27,
   upperArmR: 0.047,
@@ -172,7 +172,7 @@ export const BASE_PARAMS: GenParams = {
   fingerLen: 0.088,
   fingerR: 0.009,
 
-  legSpread: 0.092,
+  legSpread: 0.084,
   thighR: 0.086,
   thighDf: 0.088,
   thighDb: 0.095,
