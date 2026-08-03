@@ -811,6 +811,39 @@ input[type='range']::-webkit-slider-thumb {
   display: block;
 }
 
+.body-hint {
+  margin: 0;
+}
+
+.group-caret {
+  display: inline-block;
+  margin-right: 9px;
+  font-size: 11px;
+  opacity: 0.55;
+  transition: transform 0.15s ease;
+}
+
+.body-group.open .group-caret {
+  transform: rotate(90deg);
+}
+
+.body-open-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 999px;
+  padding: 7px 14px 7px 11px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.body-open-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
 .body-group {
   border: 1px solid var(--line);
   border-radius: 12px;

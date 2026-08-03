@@ -526,7 +526,7 @@ export const MORPH_BY_ID = new Map(MORPHS.map((m) => [m.id, m]));
 
 /** UI group presentation order + labels. */
 export const GROUPS: { id: SliderGroup; label: string }[] = [
-  { id: 'macro', label: 'Macro' },
+  { id: 'macro', label: 'Overall shape' },
   { id: 'head', label: 'Head & face' },
   { id: 'expression', label: 'Expression' },
   { id: 'neck', label: 'Neck' },

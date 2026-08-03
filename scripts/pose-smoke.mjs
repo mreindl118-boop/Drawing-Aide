@@ -234,8 +234,7 @@ try {
     sp.editor.select(sp.editor.doc.list().find((o) => o.character).id);
     sp.editor.figures.openPanel(sp.editor.doc.list().find((o) => o.character).id);
     const panel = document.querySelector('.side-panel');
-    // first .preset-chips container = the body-preset chip row
-    const bodyChips = panel.querySelector('.preset-chips').querySelectorAll('.preset-chip').length;
+    const bodyChips = panel.querySelectorAll('.body-preset-chips .preset-chip').length;
     // pose library group renders category chips + list
     const poseChips = panel.querySelectorAll('.pose-list .preset-chip').length;
     return { bodyChips, poseChips };

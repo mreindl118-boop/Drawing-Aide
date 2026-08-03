@@ -299,28 +299,32 @@ export class BodyPanel {
       'Adult anatomy is disabled while proportions are in a child-coded range.';
     this.content.appendChild(this.gateNotice);
 
-    this.buildPresets();
-    this.buildPoseLibrary();
-    this.buildRandomize();
-    this.buildPose();
-
+    // sliders lead the panel — the first group opens ready to drag
+    this.content.appendChild(
+      el('p', 'panel-note body-hint', 'Shape the body with the sliders below — or drag the dots right on the model. Zoom to the face for expression handles.')
+    );
     for (const g of GROUPS) {
       if (g.id === 'nsfw') continue; // appended conditionally below
       this.buildGroup(g.id, g.label);
     }
+    this.buildRandomize();
+    this.buildPresets();
+    this.buildPoseLibrary();
+    this.buildPose();
     this.buildNsfw();
     this.syncAll();
   }
 
   private buildGroup(id: SliderGroup, label: string): HTMLElement {
     const wrap = el('div', 'body-group');
+    if (id === 'macro') wrap.classList.add('open'); // headline sliders start visible
     const head = el('button', 'body-group-head');
     // expressions are transient — locked against randomize by default
     const startLocked = id === 'expression';
     const lock = el('button', 'body-lock', startLocked ? '🔒' : '🔓');
     if (startLocked) lock.classList.add('locked');
     lock.title = 'Lock group against randomize';
-    head.append(el('span', '', label), el('span', 'flex-spacer'), lock);
+    head.append(el('span', 'group-caret', '▸'), el('span', '', label), el('span', 'flex-spacer'), lock);
     const body = el('div', 'body-group-body');
     const entry = { wrap, body, locked: startLocked };
     lock.addEventListener('click', (e) => {
@@ -363,11 +367,11 @@ export class BodyPanel {
   private buildPresets(): void {
     const wrap = el('div', 'body-group open');
     const head = el('button', 'body-group-head');
-    head.append(el('span', '', 'Presets'));
+    head.append(el('span', 'group-caret', '▸'), el('span', '', 'Presets'));
     const body = el('div', 'body-group-body');
     head.addEventListener('click', () => wrap.classList.toggle('open'));
 
-    const chipRow = el('div', 'preset-chips');
+    const chipRow = el('div', 'preset-chips body-preset-chips');
     const renderChips = (): void => {
       chipRow.replaceChildren();
       for (const p of [...PRESETS, ...this.host.customPresets()]) {
@@ -441,7 +445,7 @@ export class BodyPanel {
   private buildPoseLibrary(): void {
     const wrap = el('div', 'body-group');
     const head = el('button', 'body-group-head');
-    head.append(el('span', '', 'Pose library'));
+    head.append(el('span', 'group-caret', '▸'), el('span', '', 'Pose library'));
     head.addEventListener('click', () => wrap.classList.toggle('open'));
     const body = el('div', 'body-group-body');
 

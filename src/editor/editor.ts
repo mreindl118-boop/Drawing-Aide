@@ -20,7 +20,7 @@ import { Gizmo, type GizmoMode } from './gizmo';
 import { QuickShape, buildQuickShapeGeometry, type Make3DKind, type QuickShapeResult } from './quickshape';
 import { BooleanEngine } from './booleans';
 import { bakeObjectGeo, collectExportMeshes, deliverFile, exportGLB, exportOBJ, exportSTL, type FigureGLBData } from './exporter';
-import { EdgeSlider, SidePanel, el, iconBtn, segmented, shortcutOverlay, sliderRow, toast } from './ui';
+import { EdgeSlider, ICONS, SidePanel, el, iconBtn, segmented, shortcutOverlay, sliderRow, toast } from './ui';
 import { FigureManager, figureExportParts, splitFigureParts } from '../anatomy/integration';
 import { AnatomyEngine } from '../anatomy/engine';
 import { cloneCharacter } from '../anatomy/character';
@@ -366,6 +366,15 @@ export class Editor {
       return;
     }
     this.objectBar.classList.add('visible');
+    if (obj.character) {
+      // figures get a headline entry point to the anatomy sliders
+      const b = el('button', 'body-open-btn');
+      b.innerHTML = ICONS.body + '<span>Body</span>';
+      b.title = 'Anatomy sliders';
+      b.addEventListener('click', () => this.figures.openPanel(obj.id));
+      this.objectBar.appendChild(b);
+      this.objectBar.appendChild(el('div', 'tray-sep-v'));
+    }
     for (const c of PALETTE) {
       const dot = el('button', 'color-dot');
       dot.style.background = c;
@@ -634,10 +643,13 @@ export class Editor {
   // -------------------------------------------------------------- selection
 
   select(id: string | null): void {
+    const prev = this.selection;
     this.selection = id;
     this.viewport.setSelected(id);
     if (id && this.tool === 'move') this.attachGizmo(id);
     else this.gizmo.detach();
+    // picking up a figure surfaces its anatomy sliders right away
+    if (id && id !== prev && this.figures.isFigure(id)) this.figures.openPanel(id);
     this.refreshObjectBar();
   }
 
