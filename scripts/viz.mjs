@@ -15,20 +15,22 @@ await page.waitForSelector('.gallery-root', { timeout: 20000 });
 await page.click('.new-card');
 await page.waitForSelector('.viewport-canvas', { timeout: 20000 });
 const id = await page.evaluate(() => window.__sculptpad.addBody());
-await page.evaluate(() => {
+// VIZ_MATCAP=0 → shaded skin material (realism checks); default clay matcap (form checks)
+await page.evaluate((matcap) => {
   const sp = window.__sculptpad;
-  sp.editor.doc.setSettings({ matcap: true });
+  sp.editor.doc.setSettings({ matcap });
   sp.editor.figures.closePanel();
   sp.editor.select(null);
   document.querySelector('.tool-tray').style.display = 'none';
   document.querySelector('.edge-slider').style.display = 'none';
-});
+}, process.env.VIZ_MATCAP !== '0');
 
 for (const preset of presets) {
   await page.evaluate(
     async ({ id, preset, view }) => {
       const sp = window.__sculptpad;
-      await sp.applyPresetBlend(id, preset, preset, 1);
+      if (sp.applyPresetFull) await sp.applyPresetFull(id, preset);
+      else await sp.applyPresetBlend(id, preset, preset, 1);
       sp.editor.select(null);
       sp.editor.figures.closePanel();
       const rig = sp.editor.rig;

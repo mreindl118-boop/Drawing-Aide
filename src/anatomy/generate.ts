@@ -442,14 +442,21 @@ export function emitBody(P: GenParams, em: Emitter): {
     [
       st([0, hb - P.chinDrop, hz + 0.002], P.jawW * 0.96, P.jawDf * 0.92, P.headDb * 0.74, 2.0, REGION.face, B.head),
       st([0, hb + 0.018, hz + 0.006], P.jawW, P.jawDf, P.headDb * 0.76, 2.0, REGION.face, B.head),
-      st([0, hb + 0.048, hz + 0.003], P.jawW * 1.07, P.jawDf * 1.03, P.headDb * 0.85, 1.98, REGION.face, B.head),
-      st([0, hb + 0.078, hz], P.headW * 0.93, P.headDf * 0.97, P.headDb * 0.93, P.craniumN, REGION.face, B.head),
+      st([0, hb + 0.048, hz + 0.003], P.jawW * 1.07, P.jawDf * 1.01, P.headDb * 0.85, 1.98, REGION.face, B.head),
+      // the infraorbital dip between mouth and brow must stay SHALLOW: a deep
+      // V-valley between stations turns into a sharp ring-crease under the
+      // monotone interpolator (it kept reading as a shelf across the face)
+      st([0, hb + 0.078, hz], P.headW * 0.955, P.headDf * 0.978, P.headDb * 0.94, P.craniumN, REGION.face, B.head),
+      st([0, hb + 0.093, hz], P.headW * 0.985, P.headDf * 0.99, P.headDb * 0.97, P.craniumN, REGION.face, B.head),
       st([0, hb + 0.108, hz], P.headW, P.headDf, P.headDb, P.craniumN, REGION.face, B.head),
-      st([0, hb + 0.145, hz - 0.003], P.headW * 0.99, P.headDf * 0.9, P.headDb * 1.02, P.craniumN, REGION.face, B.head),
+      st([0, hb + 0.125, hz - 0.001], P.headW * 0.995, P.headDf * 0.985, P.headDb * 1.0, P.craniumN, REGION.face, B.head),
+      st([0, hb + 0.145, hz - 0.003], P.headW * 0.99, P.headDf * 0.94, P.headDb * 1.02, P.craniumN, REGION.face, B.head),
       st([0, P.crownY - 0.02, hz - 0.012], P.headW * 0.8, P.headDf * 0.72, P.headDb * 0.8, 2.05, REGION.face, B.head)
     ],
-    52,
-    6,
+    // the face needs the densest mesh on the body: eyelid- and lip-scale
+    // creases are sub-centimeter, so the head runs ~2.5× body density
+    88,
+    10,
     [0, 0, 1],
     { startDome: 0.014, endDome: 0.022 }
   );

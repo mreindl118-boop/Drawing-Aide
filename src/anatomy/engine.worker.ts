@@ -39,6 +39,10 @@ let detailDelta: Float32Array;
 let work: Float32Array;
 let normals: Float32Array;
 let jointsOut: Float32Array;
+// vertex adjacency (built once) drives per-vertex cavity shading
+let adjOff: Uint32Array;
+let adjList: Uint32Array;
+let cavity: Float32Array;
 
 function bakeDir(def: MorphDef, dir: 'pos' | 'neg'): BakedDir | null {
   const spec = dir === 'pos' ? def.pos : def.neg;
@@ -74,6 +78,50 @@ function init(): void {
   work = new Float32Array(basePos.length);
   normals = new Float32Array(basePos.length);
   jointsOut = new Float32Array(baseJoints.length);
+  buildAdjacency();
+}
+
+function buildAdjacency(): void {
+  const vc = topo.vertCount;
+  const sets: Set<number>[] = Array.from({ length: vc }, () => new Set());
+  const idx = topo.indices;
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t], b = idx[t + 1], c = idx[t + 2];
+    sets[a].add(b).add(c);
+    sets[b].add(a).add(c);
+    sets[c].add(a).add(b);
+  }
+  let total = 0;
+  for (const s of sets) total += s.size;
+  adjOff = new Uint32Array(vc + 1);
+  adjList = new Uint32Array(total);
+  let k = 0;
+  for (let v = 0; v < vc; v++) {
+    adjOff[v] = k;
+    for (const n of sets[v]) adjList[k++] = n;
+  }
+  adjOff[vc] = k;
+  cavity = new Float32Array(vc);
+}
+
+/** Concavity = mean signed elevation of neighbors above the tangent plane:
+ *  positive in creases and pits, negative on ridges. The main thread turns
+ *  this into crevice darkening on the skin material. */
+function computeCavity(): void {
+  const vc = topo.vertCount;
+  for (let v = 0; v < vc; v++) {
+    const px = work[v * 3], py = work[v * 3 + 1], pz = work[v * 3 + 2];
+    const nx = normals[v * 3], ny = normals[v * 3 + 1], nz = normals[v * 3 + 2];
+    let c = 0;
+    const s = adjOff[v], e = adjOff[v + 1];
+    for (let k = s; k < e; k++) {
+      const n = adjList[k];
+      const dx = work[n * 3] - px, dy = work[n * 3 + 1] - py, dz = work[n * 3 + 2] - pz;
+      const l = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+      c += (dx * nx + dy * ny + dz * nz) / l;
+    }
+    cavity[v] = e > s ? c / (e - s) : 0;
+  }
 }
 
 // --------------------------------------------------------------- composing
@@ -331,10 +379,12 @@ function compose(req: ComposeReq): void {
 
   if (req.pose && Object.keys(req.pose).length) applyPose(req.pose);
   computeNormals();
+  computeCavity();
 
   const positions = work.slice();
   const norms = normals.slice();
   const joints = jointsOut.slice();
+  const cav = cavity.slice();
   (self as unknown as Worker).postMessage(
     {
       type: 'composed',
@@ -342,10 +392,11 @@ function compose(req: ComposeReq): void {
       positions,
       normals: norms,
       joints,
+      cavity: cav,
       measurements: m,
       composeMs: performance.now() - t0
     },
-    [positions.buffer, norms.buffer, joints.buffer]
+    [positions.buffer, norms.buffer, joints.buffer, cav.buffer]
   );
 }
 

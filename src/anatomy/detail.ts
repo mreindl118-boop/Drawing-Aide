@@ -25,45 +25,61 @@ const fc = (
   extra: Partial<FieldOp> = {}
 ): FieldOp => ({ anchor, r, amp, dir, mirror: false, ...extra });
 
-export const BASE_DETAIL: FieldOp[] = [
+const FACE_OPS: FieldOp[] = [
   // ------------------------------------------------------------------ face
-  // (feature sizes match real anatomy — a nose is ~3.5 cm, not a pimple)
+  // (feature sizes match real anatomy — a nose is ~3.5 cm, not a pimple;
+  //  the dense head mesh lets creases run sharp: high k = crisp transition)
   // eye sockets: recessed almond hollows…
-  f('eyeL', 0.018, -0.007, [0, 0, 1], { stretch: [1.25, 0.9, 1], k: 2.6 }),
-  // …with eyeball + lid volume inside
-  f('eyeL', 0.011, 0.0055, [0, 0, 1], { k: 3 }),
+  f('eyeL', 0.019, -0.009, [0, 0, 1], { stretch: [1.3, 0.85, 1], k: 2.8 }),
+  // …with eyeball volume inside…
+  f('eyeL', 0.0115, 0.008, [0, 0, 1], { k: 3.4 }),
+  // …upper and lower lid ledges over the ball…
+  f('eyeL', 0.012, 0.0035, [0, -0.3, 1], { offset: [0, 0.0065, 0.001], stretch: [1.25, 0.45, 1], k: 3.6 }),
+  f('eyeL', 0.011, 0.0022, [0, 0.3, 1], { offset: [0, -0.006, 0.0005], stretch: [1.3, 0.4, 1], k: 3.8 }),
+  // …crisp upper-lid fold line and lower-lid shadow line
+  f('eyeL', 0.011, -0.0028, [0, 0, 1], { offset: [0, 0.0105, 0.001], stretch: [1.5, 0.28, 1], k: 4.2 }),
+  f('eyeL', 0.01, -0.0018, [0, 0, 1], { offset: [0, -0.0095, 0.0005], stretch: [1.5, 0.3, 1], k: 4.2 }),
+  // inner-corner tear duct dip
+  f('eyeL', 0.006, -0.002, [0, 0, 1], { offset: [-0.013, -0.002, 0], k: 3.6 }),
   // brow bar over both sockets
-  f('browL', 0.03, 0.0055, [0, 0.15, 1], { stretch: [1.5, 0.72, 1] }),
+  f('browL', 0.03, 0.0062, [0, 0.15, 1], { stretch: [1.5, 0.68, 1] }),
   // glabella (between brows) + nasal root dip
-  fc('noseTip', 0.014, -0.004, [0, 0, 1], { offset: [0, 0.037, 0.001], k: 2.6 }),
-  // nose: full ridge, bridge, alae
-  fc('noseTip', 0.022, 0.011, [0, -0.05, 1], { stretch: [0.42, 1.1, 1] }),
-  fc('noseTip', 0.011, 0.007, 'out', { k: 3 }),
-  fc('noseTip', 0.016, 0.008, [0, 0, 1], { offset: [0, 0.024, -0.006], stretch: [0.5, 1.5, 1] }),
-  f('noseTip', 0.011, 0.006, 'out', { offset: [0.012, -0.01, -0.005], k: 2.6 }),
+  fc('noseTip', 0.014, -0.0048, [0, 0, 1], { offset: [0, 0.037, 0.001], k: 2.8 }),
+  // nose: full ridge, bridge, tip ball, alae
+  fc('noseTip', 0.022, 0.012, [0, -0.05, 1], { stretch: [0.4, 1.1, 1] }),
+  fc('noseTip', 0.011, 0.008, 'out', { k: 3.2 }),
+  fc('noseTip', 0.016, 0.0085, [0, 0, 1], { offset: [0, 0.024, -0.006], stretch: [0.48, 1.5, 1] }),
+  f('noseTip', 0.011, 0.0068, 'out', { offset: [0.012, -0.01, -0.005], k: 2.9 }),
+  // alar crease around each wing
+  f('noseTip', 0.008, -0.0028, [0.4, 0, 1], { offset: [0.016, -0.008, -0.009], k: 3.8 }),
   // nostril underside shadow
-  fc('noseTip', 0.009, -0.003, [0, 1, 0.2], { offset: [0, -0.014, -0.004], k: 3 }),
-  // lips: block, seam crease, philtrum, nasolabial hint
-  fc('mouth', 0.02, 0.0055, [0, 0, 1], { stretch: [1.5, 0.9, 1] }),
-  fc('mouth', 0.02, -0.005, [0, 0, 1], { stretch: [1.6, 0.26, 1], k: 3.2 }),
-  fc('mouth', 0.007, -0.003, [0, 0, 1], { offset: [0, 0.014, 0.002], k: 2.8 }),
-  f('mouth', 0.012, -0.0022, [0, 0, 1], { offset: [0.02, 0.008, -0.002], stretch: [0.6, 1.4, 1] }),
-  // chin ball + mental crease
-  fc('chin', 0.016, 0.0045, [0, -0.2, 1], { offset: [0, 0.01, 0] }),
-  fc('chin', 0.012, -0.0025, [0, 0, 1], { offset: [0, 0.024, 0.003], stretch: [1.6, 0.5, 1], k: 3.2 }),
+  fc('noseTip', 0.009, -0.0038, [0, 1, 0.2], { offset: [0, -0.0145, -0.004], k: 3.4 }),
+  // lips: block, sharp seam, vermilion rolls, philtrum, nasolabial fold
+  fc('mouth', 0.02, 0.0062, [0, 0, 1], { stretch: [1.5, 0.9, 1] }),
+  fc('mouth', 0.02, -0.0058, [0, 0, 1], { stretch: [1.7, 0.2, 1], k: 4 }),
+  fc('mouth', 0.016, 0.0028, [0, 0.25, 1], { offset: [0, 0.006, 0.001], stretch: [1.35, 0.42, 1], k: 3.4 }),
+  fc('mouth', 0.015, 0.0032, [0, -0.2, 1], { offset: [0, -0.007, 0.001], stretch: [1.2, 0.5, 1], k: 3.2 }),
+  fc('mouth', 0.007, -0.0034, [0, 0, 1], { offset: [0, 0.0145, 0.002], k: 3 }),
+  f('mouth', 0.013, -0.0028, [0, 0, 1], { offset: [0.021, 0.009, -0.002], stretch: [0.55, 1.5, 1], k: 3 }),
+  // under-lip shadow above the chin ball
+  fc('chin', 0.013, -0.0032, [0, 0, 1], { offset: [0, 0.0255, 0.003], stretch: [1.5, 0.45, 1], k: 3.6 }),
+  // chin ball
+  fc('chin', 0.016, 0.005, [0, -0.2, 1], { offset: [0, 0.01, 0] }),
   // cheekbone plane + under-cheek hollow
-  f('cheekL', 0.036, 0.0045, [0.55, 0.15, 0.75], { offset: [0, -0.012, 0.004] }),
-  f('cheekL', 0.026, -0.0035, [0.3, 0, 1], { offset: [-0.004, -0.024, 0.006] }),
+  f('cheekL', 0.036, 0.005, [0.55, 0.15, 0.75], { offset: [0, -0.012, 0.004] }),
+  f('cheekL', 0.026, -0.004, [0.3, 0, 1], { offset: [-0.004, -0.024, 0.006] }),
   // temples flatten the upper sides
   f('eyeL', 0.024, -0.004, [1, 0, 0], { offset: [0.03, 0.028, -0.03] }),
   // jawline edge
-  f('jawSideL', 0.024, 0.0045, [0.85, -0.25, 0.1], { offset: [0.002, 0.006, 0.008] }),
+  f('jawSideL', 0.024, 0.005, [0.85, -0.25, 0.1], { offset: [0.002, 0.006, 0.008] }),
   // ears with concha dip
   f('earL', 0.02, 0.009, 'out', { stretch: [0.6, 1.2, 1] }),
   f('earL', 0.01, -0.0035, [1, 0, 0], { offset: [-0.003, 0, 0.004], k: 3 }),
   // occipital bulge (back of skull)
-  fc('crown', 0.04, 0.006, [0, -0.15, -1], { offset: [0, -0.045, -0.055] }),
+  fc('crown', 0.04, 0.006, [0, -0.15, -1], { offset: [0, -0.045, -0.055] })
+];
 
+const BODY_OPS: FieldOp[] = [
   // ---------------------------------------------------------------- torso
   // clavicle ridges with supraclavicular dip above
   f('neckBase', 0.032, 0.0038, [0, 0.35, 1], { offset: [0.055, -0.028, 0.045], stretch: [1.9, 0.55, 1] }),
@@ -105,6 +121,8 @@ export const BASE_DETAIL: FieldOp[] = [
   // achilles + ankle bones
   f('heelL', 0.012, 0.0025, 'out', { offset: [0.012, 0.045, 0.01], k: 3 })
 ];
+
+export const BASE_DETAIL: FieldOp[] = [...FACE_OPS, ...BODY_OPS];
 
 /** driven by the muscle-definition slider (and, softer, the muscle macro) */
 export const DEFINITION_FIELDS: FieldOp[] = [

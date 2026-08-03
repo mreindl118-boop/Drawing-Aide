@@ -95,6 +95,15 @@ function exposeTestHooks(): void {
       await editor!.figures.commitCharacter(id, next, `Blend ${a} × ${b}`);
       return true;
     },
+    applyPresetFull: async (id: string, presetId: string) => {
+      const { PRESET_BY_ID } = await import('./anatomy/presets');
+      const p = PRESET_BY_ID.get(presetId);
+      if (!p) return false;
+      const sp = window as unknown as { __sculptpad: { applyPresetBlend(id: string, a: string, b: string, t: number): Promise<boolean> } };
+      const ok = await sp.__sculptpad.applyPresetBlend(id, presetId, presetId, 1);
+      if (p.skin) editor!.doc.setProps(id, { color: p.skin });
+      return ok;
+    },
     // ---- pose system hooks ----
     poseLibraryCounts: async () => {
       const lib = editor!.figures.poseLibrary();

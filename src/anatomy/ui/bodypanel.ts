@@ -12,6 +12,8 @@ export interface BodyPanelHost {
   getCharacter(): CharacterParams;
   /** live=false means final value → push one undo entry */
   applyWeights(weights: Record<string, number>, sideWeights: Record<string, { l: number; r: number }>, commit: boolean, label: string): void;
+  /** set the figure's skin tone (undoable) — used by preset default skins */
+  setSkin(color: string): void;
   setPose(pose: Record<string, [number, number, number]> | null): void;
   nsfwEnabled(): boolean;
   setNsfwEnabled(on: boolean): void;
@@ -379,6 +381,8 @@ export class BodyPanel {
         chip.addEventListener('click', () => {
           const c = this.host.getCharacter();
           this.host.applyWeights({ ...p.weights }, c.sideWeights, true, `Preset: ${p.label}`);
+          const skin = (p as { skin?: string }).skin;
+          if (skin) this.host.setSkin(skin);
           this.syncAll();
         });
         chipRow.appendChild(chip);

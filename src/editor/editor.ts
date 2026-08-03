@@ -29,6 +29,8 @@ import { updateManager, versionInfo } from '../app/updates';
 type Tool = 'move' | 'draw' | 'boolean';
 
 const PALETTE = ['#9aa0ab', '#e8695a', '#f0a24b', '#e5c95c', '#7cba6d', '#5aa9e6', '#9b7fe8', '#e884b8'];
+/** figures pick from skin tones (incl. fantasy) instead of the object palette */
+const FIGURE_PALETTE = ['#f1d3c0', '#e0b092', '#c69076', '#b57f52', '#8d5a35', '#5f3a22', '#7a9a52', '#8f9bb0'];
 const GRID_SNAP = 0.25;
 
 type PrimitiveKind = 'sphere' | 'cube' | 'cylinder' | 'capsule' | 'torus' | 'plane';
@@ -375,7 +377,7 @@ export class Editor {
       this.objectBar.appendChild(b);
       this.objectBar.appendChild(el('div', 'tray-sep-v'));
     }
-    for (const c of PALETTE) {
+    for (const c of obj.character ? FIGURE_PALETTE : PALETTE) {
       const dot = el('button', 'color-dot');
       dot.style.background = c;
       if (c === obj.color) dot.classList.add('active');

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import type { Doc } from '../core/doc';
 import type { SceneObjectData } from '../core/types';
@@ -48,6 +49,8 @@ export class Viewport {
   private views = new Map<string, ObjectView>();
   private stdMats = new Map<string, THREE.MeshStandardMaterial>();
   private matcapMats = new Map<string, THREE.MeshMatcapMaterial>();
+  private figMats = new Map<string, THREE.MeshPhysicalMaterial>();
+  private figMatcapMats = new Map<string, THREE.MeshMatcapMaterial>();
   private matcapTex = makeMatcapTexture();
   private useMatcap = false;
   private selectedId: string | null = null;
@@ -66,17 +69,25 @@ export class Viewport {
     });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 0.98;
     container.appendChild(this.renderer.domElement);
     this.renderer.domElement.className = 'viewport-canvas';
 
     this.scene.background = new THREE.Color('#17181c');
     this.scene.add(this.overlayGroup);
 
-    // studio lighting
-    const hemi = new THREE.HemisphereLight('#cdd2dc', '#3a3c42', 1.1);
-    const key = new THREE.DirectionalLight('#ffffff', 2.0);
-    key.position.set(3, 6, 4);
+    // image-based lighting: soft studio-room reflections ground the PBR
+    // materials (skin especially) instead of relying on bare analytic lights
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environmentIntensity = 0.32;
+    pmrem.dispose();
+
+    // studio lighting: raking key so shallow facial relief still shades;
+    // IBL + hemi fill stay low so they don't flatten the form
+    const hemi = new THREE.HemisphereLight('#cdd2dc', '#3a3c42', 0.35);
+    const key = new THREE.DirectionalLight('#fff2e4', 1.75);
+    key.position.set(4.5, 5.5, 2.5);
     const rim = new THREE.DirectionalLight('#9db4ff', 0.7);
     rim.position.set(-4, 2.5, -3.5);
     this.scene.add(hemi, key, rim);
@@ -160,12 +171,52 @@ export class Viewport {
     return m;
   }
 
+  /** Figures get a skin-grade physical material with vertex-color crevice
+   *  shading; everything else keeps the plain clay material. */
+  private materialFor(obj: SceneObjectData): THREE.Material {
+    if (!obj.character) return this.material(obj.color);
+    if (this.useMatcap) {
+      let m = this.figMatcapMats.get(obj.color);
+      if (!m) {
+        m = new THREE.MeshMatcapMaterial({ matcap: this.matcapTex, color: obj.color, vertexColors: true });
+        this.figMatcapMats.set(obj.color, m);
+      }
+      return m;
+    }
+    let m = this.figMats.get(obj.color);
+    if (!m) {
+      m = new THREE.MeshPhysicalMaterial({
+        color: obj.color,
+        roughness: 0.47,
+        metalness: 0,
+        vertexColors: true,
+        // sheen fakes the peach-fuzz rim scatter real skin has
+        sheen: 0.35,
+        sheenRoughness: 0.55,
+        sheenColor: new THREE.Color('#ffd9c4'),
+        specularIntensity: 0.5
+      });
+      this.figMats.set(obj.color, m);
+    }
+    return m;
+  }
+
+  /** vertexColors materials render black without a color attribute — give
+   *  figure geometry a neutral one until the first composed frame lands. */
+  private ensureColorAttr(g: THREE.BufferGeometry): void {
+    const pos = g.getAttribute('position');
+    const col = g.getAttribute('color');
+    if (!col || col.count !== pos.count) {
+      g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3).fill(1), 3));
+    }
+  }
+
   setMatcap(on: boolean): void {
     this.useMatcap = on;
     for (const [id, v] of this.views) {
       const obj = this.doc.get(id);
       if (!obj) continue;
-      v.mesh.material = this.material(obj.color);
+      v.mesh.material = this.materialFor(obj);
       if (v.mirror) v.mirror.material = v.mesh.material;
     }
     this.applySelection();
@@ -180,7 +231,9 @@ export class Viewport {
 
   private addView(obj: SceneObjectData): void {
     const group = new THREE.Group();
-    const mesh = new THREE.Mesh(toBufferGeometry(obj.geo), this.material(obj.color));
+    const geometry = toBufferGeometry(obj.geo);
+    if (obj.character) this.ensureColorAttr(geometry);
+    const mesh = new THREE.Mesh(geometry, this.materialFor(obj));
     mesh.userData.objectId = obj.id;
     group.add(mesh);
     this.scene.add(group);
@@ -204,6 +257,8 @@ export class Viewport {
     if (what === 'character') return; // figure runtime drives the live mesh
     if (what === 'geo') {
       v.mesh.geometry = toBufferGeometry(obj.geo);
+      if (obj.character) this.ensureColorAttr(v.mesh.geometry);
+      v.mesh.material = this.materialFor(obj); // bake may add/remove figure-ness
     }
     if (what === 'transform' || what === 'geo') {
       const t = obj.transform;
@@ -212,7 +267,7 @@ export class Viewport {
       v.mesh.scale.set(...t.scale);
     }
     if (what === 'appearance') {
-      v.mesh.material = this.material(obj.color);
+      v.mesh.material = this.materialFor(obj);
       v.group.visible = obj.visible;
     }
     this.syncMirror(obj, v);
@@ -235,6 +290,7 @@ export class Viewport {
       v.group.add(v.mirror);
     }
     v.mirror.geometry = toBufferGeometry(mirroredGeo(obj.geo, obj.mirror));
+    if (obj.character) this.ensureColorAttr(v.mirror.geometry);
     v.mirror.material = v.mesh.material;
     const t = obj.transform;
     const k = obj.mirror === 'x' ? 0 : obj.mirror === 'y' ? 1 : 2;
@@ -286,7 +342,7 @@ export class Viewport {
           const obj = this.doc.get(id);
           (mesh.userData.selMat as THREE.Material).dispose();
           mesh.userData.selMat = null;
-          if (obj) mesh.material = this.material(obj.color);
+          if (obj) mesh.material = this.materialFor(obj);
         }
       };
       apply(v.mesh);

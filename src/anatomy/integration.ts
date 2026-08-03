@@ -148,7 +148,7 @@ export class FigureManager {
         name,
         geo,
         transform: identityTransform(),
-        color: '#9aa0ab',
+        color: (preset && PRESET_BY_ID.get(preset)?.skin) || '#c69076',
         mirror: null,
         visible: true,
         character
@@ -247,6 +247,17 @@ export class FigureManager {
         const next = cloneCharacter(cur);
         next.pose = pose;
         void mgr.commitCharacter(id, next, 'Pose');
+      },
+      setSkin(color) {
+        const obj = deps.doc.get(id);
+        if (!obj || obj.color === color) return;
+        const before = obj.color;
+        const doc = deps.doc;
+        deps.history.push({
+          label: 'Skin tone',
+          do: () => doc.setProps(id, { color }),
+          undo: () => doc.setProps(id, { color: before })
+        });
       },
       nsfwEnabled: () => !!deps.doc.settings.nsfwEnabled,
       setNsfwEnabled(on) {

@@ -36,6 +36,8 @@ export interface ComposeResult {
   positions: Float32Array;
   normals: Float32Array;
   joints: Float32Array;
+  /** per-vertex concavity (creases > 0, ridges < 0) for skin crevice shading */
+  cavity: Float32Array;
   measurements: Measurements;
   /** worker-side compute time for this frame, ms */
   composeMs: number;
@@ -184,8 +186,32 @@ export class FigureRuntime {
       (nrm.array as Float32Array).set(res.normals);
       nrm.needsUpdate = true;
     }
+    this.writeCavityTint(g, res);
     g.computeBoundingSphere();
     g.boundingBox = null;
+  }
+
+  /** Crevice shading: creases darken and warm (skin scatters red into folds),
+   *  ridges catch a whisper of light. Baked as vertex colors that multiply
+   *  the skin material, so it works with any tone. */
+  private writeCavityTint(g: THREE.BufferGeometry, res: ComposeResult): void {
+    if (!res.cavity || res.cavity.length * 3 !== res.positions.length) return;
+    let col = g.getAttribute('color') as THREE.BufferAttribute | undefined;
+    if (!col || col.array.length !== res.positions.length) {
+      col = new THREE.BufferAttribute(new Float32Array(res.positions.length).fill(1), 3);
+      g.setAttribute('color', col);
+    }
+    const a = col.array as Float32Array;
+    const cav = res.cavity;
+    // deadzone keeps smooth skin untouched; gain stays gentle so structural
+    // ring-creases don't get outlined — only deep folds shade noticeably
+    for (let v = 0; v < cav.length; v++) {
+      const k = Math.min(1, Math.max(0, cav[v] - 0.025) * 3.5);
+      a[v * 3] = 1 - 0.18 * k;
+      a[v * 3 + 1] = 1 - 0.28 * k;
+      a[v * 3 + 2] = 1 - 0.33 * k;
+    }
+    col.needsUpdate = true;
   }
 
   /** Snapshot the current composed mesh as immutable GeoData for the doc. */
