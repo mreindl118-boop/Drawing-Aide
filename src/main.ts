@@ -53,6 +53,75 @@ function exposeTestHooks(): void {
       const geoB = bakeObjectGeo(editor.doc.get(b)!);
       const res = await editor.booleans.boolean(op, geoA, geoB);
       return res.indices.length / 3;
+    },
+    // ---- anatomy engine hooks ----
+    addBody: (preset?: string) => editor!.figures.addFigure(preset),
+    setBodyWeights: (id: string, w: Record<string, number>) => editor!.figures.setWeights(id, w),
+    setBodyPose: (id: string, pose: Record<string, [number, number, number]> | null) =>
+      editor!.figures.setPose(id, pose),
+    bodyMeasurements: (id: string) => editor!.figures.measurementsOf(id),
+    bodyComposeProbe: (id: string, n?: number) => editor!.figures.composeProbe(id, n),
+    bakeBody: (id: string) => editor!.figures.bakeFigure(id),
+    applyPresetBlend: async (id: string, a: string, b: string, t: number) => {
+      const { PRESET_BY_ID, blendPresets } = await import('./anatomy/presets');
+      const wa = PRESET_BY_ID.get(a)?.weights ?? {};
+      const wb = PRESET_BY_ID.get(b)?.weights ?? {};
+      const mixed = blendPresets(wa, wb, t);
+      // replace (not merge): blends define the whole recipe
+      const cur = editor!.doc.get(id)?.character;
+      if (!cur) return false;
+      const { cloneCharacter } = await import('./anatomy/character');
+      const next = cloneCharacter(cur);
+      next.weights = mixed;
+      await editor!.figures.commitCharacter(id, next, `Blend ${a} × ${b}`);
+      return true;
+    },
+    glbProbe: async () => {
+      const { collectExportMeshes, exportGLB } = await import('./editor/exporter');
+      const figData = await (editor as unknown as {
+        buildFigureGLBData(): Promise<import('./editor/exporter').FigureGLBData | null>;
+      }).buildFigureGLBData();
+      const meshes = collectExportMeshes(editor!.doc).filter((m) => !m.isFigure);
+      const blob = await exportGLB(meshes, figData ?? undefined);
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      const magic = String.fromCharCode(buf[0], buf[1], buf[2], buf[3]);
+      const jsonLen = new DataView(buf.buffer).getUint32(12, true);
+      const json = JSON.parse(new TextDecoder().decode(buf.slice(20, 20 + jsonLen)));
+      const mesh = json.meshes?.find(
+        (m: { primitives?: { targets?: unknown[] }[]; extras?: { targetNames?: string[] } }) =>
+          m.primitives?.[0]?.targets?.length
+      );
+      return {
+        magic,
+        bytes: buf.length,
+        targets: mesh?.primitives[0].targets.length ?? 0,
+        hasSkin: (json.skins?.length ?? 0) > 0,
+        hasNames: !!mesh?.extras?.targetNames?.length
+      };
+    },
+    sculptOnBody: async (id: string, amp: number) => {
+      // fake sculpt-layer edit: raise a bump so tests can verify the layer
+      const { AnatomyEngine } = await import('./anatomy/engine');
+      const topo = AnatomyEngine.shared().topology!;
+      const delta = new Float32Array(topo.vertCount * 3);
+      const vi = topo.landmarkVerts.bellyFront;
+      delta[vi * 3 + 2] += amp;
+      await editor!.figures.applySculptDelta(id, delta, 'Test sculpt');
+      return true;
+    },
+    manifoldCheck: async (geoOwner: string) => {
+      if (!editor) throw new Error('no editor');
+      const { collectExportMeshes } = await import('./editor/exporter');
+      const { figureExportParts, splitFigureParts } = await import('./anatomy/integration');
+      const { AnatomyEngine } = await import('./anatomy/engine');
+      const meshes = collectExportMeshes(editor.doc).filter((m) => m.id === geoOwner);
+      if (!meshes.length) return null;
+      const m = meshes[0];
+      if (m.isFigure) {
+        const topo = AnatomyEngine.shared().topology!;
+        m.geo = await editor.booleans.unionAll(splitFigureParts(m.geo, figureExportParts(m.geo, topo)));
+      }
+      return editor.booleans.check(m.geo);
     }
   };
 }

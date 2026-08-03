@@ -198,9 +198,10 @@ export class Viewport {
     if (this.selectedId === id) this.selectedId = null;
   }
 
-  private updateView(obj: SceneObjectData, what: 'transform' | 'geo' | 'appearance'): void {
+  private updateView(obj: SceneObjectData, what: 'transform' | 'geo' | 'appearance' | 'character'): void {
     const v = this.views.get(obj.id);
     if (!v) return;
+    if (what === 'character') return; // figure runtime drives the live mesh
     if (what === 'geo') {
       v.mesh.geometry = toBufferGeometry(obj.geo);
     }
@@ -300,6 +301,10 @@ export class Viewport {
   // ---- picking ----
 
   pick(x: number, y: number): string | null {
+    return this.pickDetail(x, y)?.id ?? null;
+  }
+
+  pickDetail(x: number, y: number): { id: string; vertexIndex: number } | null {
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
     const ndc = new THREE.Vector2((x / w) * 2 - 1, -(y / h) * 2 + 1);
@@ -311,7 +316,14 @@ export class Viewport {
       if (v.mirror) meshes.push(v.mirror);
     }
     const hits = this.raycaster.intersectObjects(meshes, false);
-    return hits.length ? (hits[0].object.userData.objectId as string) : null;
+    if (!hits.length) return null;
+    const hit = hits[0];
+    let vertexIndex = 0;
+    if (hit.face) {
+      const g = (hit.object as THREE.Mesh).geometry;
+      vertexIndex = g.index ? g.index.getX(hit.faceIndex! * 3) : hit.face.a;
+    }
+    return { id: hit.object.userData.objectId as string, vertexIndex };
   }
 
   ray(x: number, y: number): THREE.Ray {

@@ -69,6 +69,19 @@ export class BooleanEngine {
     return { positions: res.positions, normals: null, uvs: null, indices: res.indices };
   }
 
+  /** Manifold union of many closed parts (figures are overlapping solids). */
+  async unionAll(geos: GeoData[]): Promise<GeoData> {
+    const meshes = geos.map((g) => ({
+      positions: g.positions.slice(),
+      indices: g.indices.slice()
+    }));
+    const res = await this.call<{ positions: Float32Array; indices: Uint32Array }>(
+      { type: 'unionAll', meshes },
+      meshes.flatMap((m) => [m.positions.buffer, m.indices.buffer])
+    );
+    return { positions: res.positions, normals: null, uvs: null, indices: res.indices };
+  }
+
   async check(geo: GeoData): Promise<ManifoldCheck> {
     const p = geo.positions.slice();
     const i = geo.indices.slice();

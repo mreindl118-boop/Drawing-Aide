@@ -37,7 +37,9 @@ export const ICONS: Record<string, string> = {
   cylinder: '<svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="2.8" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M5 6v12c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8V6" fill="none" stroke="currentColor" stroke-width="1.9"/></svg>',
   capsule: '<svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="5" fill="none" stroke="currentColor" stroke-width="1.9"/></svg>',
   torus: '<svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="9" ry="6" fill="none" stroke="currentColor" stroke-width="1.9"/><ellipse cx="12" cy="12" rx="3.5" ry="1.8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>',
-  plane: '<svg viewBox="0 0 24 24"><path d="M4 17l5-10h11l-5 10z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg>'
+  plane: '<svg viewBox="0 0 24 24"><path d="M4 17l5-10h11l-5 10z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg>',
+  body: '<svg viewBox="0 0 24 24"><circle cx="12" cy="4.6" r="2.4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5v6m0 0l-3 7m3-7l3 7M6.5 10c1.8-1.6 9.2-1.6 11 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.8v2.6m0 13.2v2.6M4.5 7.7l2.2 1.3m10.6 6l2.2 1.3m0-8.6l-2.2 1.3m-10.6 6l-2.2 1.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'
 };
 
 export function iconBtn(icon: string, label: string, onClick?: () => void): HTMLButtonElement {

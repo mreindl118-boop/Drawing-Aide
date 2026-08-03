@@ -5,9 +5,11 @@ import type { GeoData, SceneObjectData } from '../core/types';
 import { bakeGeo, matrixFromTransform, mergeGeos, toBufferGeometry } from '../core/geo';
 
 export interface ExportMesh {
+  id: string;
   name: string;
   color: string;
   geo: GeoData; // world-baked, mirror included
+  isFigure?: boolean;
 }
 
 /** Bake one object (plus its live mirror) into world space. */
@@ -23,7 +25,13 @@ export function collectExportMeshes(doc: Doc): ExportMesh[] {
   const out: ExportMesh[] = [];
   for (const obj of doc.list()) {
     if (!obj.visible) continue;
-    out.push({ name: obj.name, color: obj.color, geo: bakeObjectGeo(obj) });
+    out.push({
+      id: obj.id,
+      name: obj.name,
+      color: obj.color,
+      geo: bakeObjectGeo(obj),
+      isFigure: !!obj.character
+    });
   }
   return out;
 }
@@ -137,7 +145,95 @@ function fmt(n: number): string {
 
 // ---------------------------------------------------------------------- GLB
 
-export function exportGLB(meshes: ExportMesh[]): Promise<Blob> {
+/** Figure data for GLB blendshape export: shared morph library + per-figure
+ *  instance (influences reproduce the current slider state in Blender). */
+export interface FigureGLBData {
+  shared: {
+    vertCount: number;
+    indices: Uint32Array;
+    uvs: Float32Array;
+    skinIndex: Uint16Array; // 2 bones per vertex
+    skinWeight: Float32Array;
+    baseJoints: Float32Array;
+    bones: string[];
+    boneParent: number[];
+    basePositions: Float32Array;
+    targetNames: string[];
+    targetDeltas: Float32Array[];
+  };
+  instances: {
+    name: string;
+    color: string;
+    influences: number[]; // aligned with targetNames
+    matrix: THREE.Matrix4;
+  }[];
+}
+
+function buildFigureNodes(data: FigureGLBData): THREE.Object3D[] {
+  const s = data.shared;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(s.basePositions.slice(), 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(s.uvs, 2));
+  geometry.setIndex(new THREE.BufferAttribute(s.indices, 1));
+  geometry.computeVertexNormals();
+  // expand 2-bone skinning to the 4-component attributes glTF expects
+  const n = s.vertCount;
+  const skinIndex = new Uint16Array(n * 4);
+  const skinWeight = new Float32Array(n * 4);
+  for (let v = 0; v < n; v++) {
+    skinIndex[v * 4] = s.skinIndex[v * 2];
+    skinIndex[v * 4 + 1] = s.skinIndex[v * 2 + 1];
+    skinWeight[v * 4] = s.skinWeight[v * 2];
+    skinWeight[v * 4 + 1] = s.skinWeight[v * 2 + 1];
+  }
+  geometry.setAttribute('skinIndex', new THREE.BufferAttribute(skinIndex, 4));
+  geometry.setAttribute('skinWeight', new THREE.BufferAttribute(skinWeight, 4));
+  geometry.morphTargetsRelative = true;
+  geometry.morphAttributes.position = s.targetDeltas.map(
+    (d) => new THREE.BufferAttribute(d, 3)
+  );
+
+  const nodes: THREE.Object3D[] = [];
+  for (const inst of data.instances) {
+    const bones: THREE.Bone[] = s.bones.map((name) => {
+      const b = new THREE.Bone();
+      b.name = name;
+      return b;
+    });
+    for (let i = 0; i < bones.length; i++) {
+      const p = s.boneParent[i];
+      const jx = s.baseJoints[i * 3];
+      const jy = s.baseJoints[i * 3 + 1];
+      const jz = s.baseJoints[i * 3 + 2];
+      if (p < 0) {
+        bones[i].position.set(jx, jy, jz);
+      } else {
+        bones[p].add(bones[i]);
+        bones[i].position.set(
+          jx - s.baseJoints[p * 3],
+          jy - s.baseJoints[p * 3 + 1],
+          jz - s.baseJoints[p * 3 + 2]
+        );
+      }
+    }
+    const mesh = new THREE.SkinnedMesh(
+      geometry,
+      new THREE.MeshStandardMaterial({ color: inst.color, roughness: 0.7, metalness: 0 })
+    );
+    mesh.name = inst.name;
+    mesh.add(bones[0]);
+    mesh.updateMatrixWorld(true);
+    mesh.bind(new THREE.Skeleton(bones));
+    mesh.morphTargetInfluences = [...inst.influences];
+    mesh.morphTargetDictionary = Object.fromEntries(s.targetNames.map((t, i) => [t, i]));
+    mesh.userData.targetNames = s.targetNames;
+    inst.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
+    nodes.push(mesh);
+  }
+  return nodes;
+}
+
+export function exportGLB(meshes: ExportMesh[], figures?: FigureGLBData): Promise<Blob> {
   const scene = new THREE.Scene();
   for (const m of meshes) {
     const mesh = new THREE.Mesh(
@@ -147,6 +243,10 @@ export function exportGLB(meshes: ExportMesh[]): Promise<Blob> {
     mesh.name = m.name;
     scene.add(mesh);
   }
+  if (figures) {
+    for (const node of buildFigureNodes(figures)) scene.add(node);
+  }
+  scene.updateMatrixWorld(true);
   return new Promise((resolve, reject) => {
     new GLTFExporter().parse(
       scene,

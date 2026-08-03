@@ -23,6 +23,8 @@ export interface SceneObjectData {
   color: string;
   mirror: MirrorAxis | null;
   visible: boolean;
+  /** parametric figure: non-destructive slider recipe (anatomy engine) */
+  character?: import('../anatomy/character').CharacterParams | null;
 }
 
 export interface CameraState {
@@ -35,6 +37,8 @@ export interface SceneSettings {
   mirrorDefault: MirrorAxis | null;
   mirrorOn: boolean;
   matcap: boolean;
+  /** per-project opt-in for the adult anatomy module (off by default) */
+  nsfwEnabled?: boolean;
 }
 
 export interface SceneSnapshot {

@@ -37,7 +37,13 @@ interface CheckRequest {
   mesh: MeshPayload;
 }
 
-type Request = BooleanRequest | CheckRequest;
+interface UnionAllRequest {
+  id: number;
+  type: 'unionAll';
+  meshes: MeshPayload[];
+}
+
+type Request = BooleanRequest | CheckRequest | UnionAllRequest;
 
 function toManifold(wasm: ManifoldModule, payload: MeshPayload) {
   const mesh = new wasm.Mesh({
@@ -53,7 +59,21 @@ self.onmessage = async (e: MessageEvent<Request>) => {
   const req = e.data;
   try {
     const wasm = await getWasm();
-    if (req.type === 'boolean') {
+    if (req.type === 'unionAll') {
+      const manifolds = req.meshes.map((m) => toManifold(wasm, m));
+      const result = wasm.Manifold.union(manifolds);
+      const status = result.status();
+      if (status !== 'NoError') throw new Error(`Union failed: ${status}`);
+      const out = result.getMesh();
+      const positions = out.vertProperties.slice() as Float32Array;
+      const indices = out.triVerts.slice() as Uint32Array;
+      for (const m of manifolds) m.delete();
+      result.delete();
+      (self as unknown as Worker).postMessage(
+        { id: req.id, ok: true, positions, indices },
+        [positions.buffer, indices.buffer]
+      );
+    } else if (req.type === 'boolean') {
       const a = toManifold(wasm, req.a);
       const b = toManifold(wasm, req.b);
       const result =

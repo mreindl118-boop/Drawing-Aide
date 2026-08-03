@@ -12,7 +12,7 @@ import { cloneTransform } from './types';
 export type DocEvent =
   | { type: 'add'; id: string }
   | { type: 'remove'; id: string }
-  | { type: 'change'; id: string; what: 'transform' | 'geo' | 'appearance' }
+  | { type: 'change'; id: string; what: 'transform' | 'geo' | 'appearance' | 'character' }
   | { type: 'settings' }
   | { type: 'reset' };
 
@@ -92,6 +92,13 @@ export class Doc {
     if (!obj) return;
     Object.assign(obj, props);
     this.emit({ type: 'change', id, what: 'appearance' });
+  }
+
+  setCharacter(id: string, character: SceneObjectData['character']): void {
+    const obj = this.objects.get(id);
+    if (!obj) return;
+    obj.character = character;
+    this.emit({ type: 'change', id, what: 'character' });
   }
 
   setSettings(patch: Partial<SceneSettings>): void {

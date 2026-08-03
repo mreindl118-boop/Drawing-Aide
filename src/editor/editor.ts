@@ -11,7 +11,7 @@ import {
   type SceneObjectData,
   type Transform
 } from '../core/types';
-import { fromBufferGeometry, geoBounds, mergeGeos, triCount } from '../core/geo';
+import { fromBufferGeometry, geoBounds, matrixFromTransform, mergeGeos, triCount } from '../core/geo';
 import { getProject, getScene, putProject, putScene } from '../core/store';
 import { CameraRig } from './camera';
 import { Viewport } from './viewport';
@@ -19,8 +19,11 @@ import { PointerGestures, type StrokePoint } from './input';
 import { Gizmo, type GizmoMode } from './gizmo';
 import { QuickShape, buildQuickShapeGeometry, type Make3DKind, type QuickShapeResult } from './quickshape';
 import { BooleanEngine } from './booleans';
-import { bakeObjectGeo, collectExportMeshes, deliverFile, exportGLB, exportOBJ, exportSTL } from './exporter';
+import { bakeObjectGeo, collectExportMeshes, deliverFile, exportGLB, exportOBJ, exportSTL, type FigureGLBData } from './exporter';
 import { EdgeSlider, SidePanel, el, iconBtn, segmented, shortcutOverlay, sliderRow, toast } from './ui';
+import { FigureManager, figureExportParts, splitFigureParts } from '../anatomy/integration';
+import { AnatomyEngine } from '../anatomy/engine';
+import { cloneCharacter } from '../anatomy/character';
 
 type Tool = 'move' | 'draw' | 'boolean';
 
@@ -39,6 +42,7 @@ export class Editor {
   quickshape: QuickShape;
   booleans = new BooleanEngine();
   panel: SidePanel;
+  figures!: FigureManager;
 
   tool: Tool = 'move';
   selection: string | null = null;
@@ -62,6 +66,7 @@ export class Editor {
     moved: number;
     lastMoveT: number;
     raw: THREE.Vector3;
+    vertexIndex: number;
   } | null = null;
 
   // draw preview state
@@ -116,6 +121,16 @@ export class Editor {
     this.gizmo = new Gizmo(this.rig.camera, this.viewport.renderer.domElement, this.viewport.scene);
     this.quickshape = new QuickShape(this.stage, this.rig, (x, y) => this.viewport.ray(x, y));
     this.panel = new SidePanel(root);
+    this.figures = new FigureManager({
+      doc: this.doc,
+      history: this.history,
+      viewport: this.viewport,
+      rig: this.rig,
+      panel: this.panel,
+      getSelection: () => this.selection,
+      select: (id) => this.select(id),
+      requestBooleanUnionAll: (geos) => this.booleans.unionAll(geos)
+    });
 
     this.buildChrome();
     this.bindGizmo();
@@ -263,6 +278,20 @@ export class Editor {
       wrap.append(b, el('span', 'prim-label', label));
       primTray.appendChild(wrap);
     }
+    // parametric bodies (anatomy engine)
+    const bodies: [string | undefined, string][] = [
+      [undefined, 'Body'],
+      ['toon', 'Toon body']
+    ];
+    for (const [preset, label] of bodies) {
+      const b = iconBtn('body', label, () => {
+        void this.figures.addFigure(preset);
+        primTray.classList.remove('open');
+      });
+      const wrap = el('div', 'prim-item');
+      wrap.append(b, el('span', 'prim-label', label));
+      primTray.appendChild(wrap);
+    }
     this.root.appendChild(primTray);
     this.primTray = primTray;
 
@@ -381,16 +410,22 @@ export class Editor {
 
   // ------------------------------------------------------------ stroke logic
 
+  private figureHandleStroke = false;
+
   private strokeStart(p: StrokePoint): boolean {
     if (this.gizmo.hot) return false; // gizmo owns this pointer
+    if (this.figures.tryBeginHandleDrag(p)) {
+      this.figureHandleStroke = true;
+      return true;
+    }
     if (this.tool === 'draw') {
       if (this.preview) this.cancelPreview();
       return this.quickshape.start(p);
     }
     if (this.tool === 'move') {
-      const hit = this.viewport.pick(p.x, p.y);
+      const hit = this.viewport.pickDetail(p.x, p.y);
       if (hit) {
-        this.beginFreeDrag(hit, p);
+        this.beginFreeDrag(hit.id, p, hit.vertexIndex);
         return true;
       }
       // empty space: let single-finger/LMB orbit; a clean tap deselects
@@ -406,6 +441,10 @@ export class Editor {
   private emptyStroke: { x: number; y: number; moved: number } | null = null;
 
   private strokeMove(p: StrokePoint): void {
+    if (this.figureHandleStroke) {
+      this.figures.handleDragMove(p);
+      return;
+    }
     if (this.tool === 'draw' && this.quickshape.isActive) {
       this.quickshape.move(p);
       return;
@@ -425,6 +464,11 @@ export class Editor {
   }
 
   private strokeEnd(p: StrokePoint): void {
+    if (this.figureHandleStroke) {
+      this.figureHandleStroke = false;
+      this.figures.handleDragEnd();
+      return;
+    }
     if (this.tool === 'draw') {
       const result = this.quickshape.end();
       if (result) this.openMake3DPanel(result);
@@ -448,6 +492,11 @@ export class Editor {
   }
 
   private strokeCancel(): void {
+    if (this.figureHandleStroke) {
+      this.figureHandleStroke = false;
+      this.figures.handleDragCancel();
+      return;
+    }
     if (this.quickshape.isActive) this.quickshape.cancel();
     if (this.drag) {
       // restore original transform
@@ -459,7 +508,7 @@ export class Editor {
 
   // ------------------------------------------------------- move / free drag
 
-  private beginFreeDrag(id: string, p: StrokePoint): void {
+  private beginFreeDrag(id: string, p: StrokePoint, vertexIndex = 0): void {
     const obj = this.doc.get(id)!;
     const pos = new THREE.Vector3(...obj.transform.position);
     const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(this.rig.forward().negate(), pos);
@@ -474,7 +523,8 @@ export class Editor {
       startPt: { x: p.x, y: p.y },
       moved: 0,
       lastMoveT: performance.now(),
-      raw: pos.clone()
+      raw: pos.clone(),
+      vertexIndex
     };
   }
 
@@ -519,9 +569,12 @@ export class Editor {
     const obj = this.doc.get(d.id);
     if (!obj) return;
     if (d.moved < 6) {
-      // it was a tap: select
+      // it was a tap: select — and on a figure, open that region's sliders
       this.doc.setTransform(d.id, d.start);
       this.select(d.id);
+      if (this.figures.isFigure(d.id)) {
+        this.figures.handleFigureTap(d.id, d.vertexIndex);
+      }
       return;
     }
     const before = d.start;
@@ -676,7 +729,8 @@ export class Editor {
       ...obj,
       id: newId(),
       name: this.doc.uniqueName(obj.name),
-      transform: cloneTransform(obj.transform)
+      transform: cloneTransform(obj.transform),
+      character: obj.character ? cloneCharacter(obj.character) : obj.character
     };
     copy.transform.position[0] += 0.5;
     this.history.push(this.cmdAdd(copy, `Duplicate ${obj.name}`));
@@ -866,6 +920,10 @@ export class Editor {
   // --------------------------------------------------------------- booleans
 
   private booleanPick(id: string): void {
+    if (this.figures.isFigure(id)) {
+      toast('Bake the body first (Body panel → Bake) to use booleans on it', { timeout: 2600 });
+      return;
+    }
     if (!this.boolA) {
       this.boolA = id;
       this.viewport.setSelected(id);
@@ -947,10 +1005,71 @@ export class Editor {
 
   // ----------------------------------------------------------------- export
 
+  /** Figures are overlapping closed parts — union them watertight for
+   *  STL/OBJ and for the manifold check. */
+  private async prepFigureMeshes(meshes: ReturnType<typeof collectExportMeshes>): Promise<void> {
+    const topo = AnatomyEngine.shared().topology;
+    if (!topo) return;
+    for (const m of meshes) {
+      if (!m.isFigure) continue;
+      const parts = figureExportParts(m.geo, topo);
+      m.geo = await this.booleans.unionAll(splitFigureParts(m.geo, parts));
+    }
+  }
+
+  private buildFigureGLBData(): Promise<import('./exporter').FigureGLBData | null> {
+    return (async () => {
+      const figs = this.doc.list().filter((o) => o.visible && o.character);
+      if (!figs.length) return null;
+      const engine = AnatomyEngine.shared();
+      await engine.ready();
+      const topo = engine.topology!;
+      const { names, arrays } = await engine.getDeltas(!!this.doc.settings.nsfwEnabled);
+      const { generateBody } = await import('../anatomy/generate');
+      const { BASE_PARAMS } = await import('../anatomy/params');
+      const basePositions = generateBody(BASE_PARAMS).positions;
+      const instances = figs.map((o) => {
+        const c = o.character!;
+        const influences = names.map((n) => {
+          const id = n.replace(/_(pos|neg)$/, '');
+          const lr = c.sideWeights[id];
+          const w = lr ? (lr.l + lr.r) / 2 : (c.weights[id] ?? 0);
+          if (n.endsWith('_pos')) return Math.max(0, w);
+          if (n.endsWith('_neg')) return Math.max(0, -w);
+          return Math.max(0, w);
+        });
+        return {
+          name: o.name,
+          color: o.color,
+          influences,
+          matrix: matrixFromTransform(o.transform)
+        };
+      });
+      return {
+        shared: {
+          vertCount: topo.vertCount,
+          indices: topo.indices,
+          uvs: topo.uvs,
+          skinIndex: topo.skinIndex,
+          skinWeight: topo.skinWeight,
+          baseJoints: topo.baseJoints,
+          bones: topo.bones,
+          boneParent: topo.boneParent,
+          basePositions,
+          targetNames: names,
+          targetDeltas: arrays
+        },
+        instances
+      };
+    })();
+  }
+
   private openExportPanel(): void {
     const content = el('div');
     let format: 'stl' | 'obj' | 'glb' = 'stl';
     let mmPerUnit = 10;
+    let glbMorphs = true;
+    const hasFigures = this.doc.list().some((o) => o.visible && o.character);
 
     const stlOpts = el('div');
     const sizeNote = el('p', 'panel-note');
@@ -973,7 +1092,7 @@ export class Editor {
     stlOpts.append(sizeNote, manifoldNote);
     updateSize();
 
-    // manifold check (async, non-blocking)
+    // manifold check (async, non-blocking; figures pre-unioned like the export)
     void (async () => {
       const meshes = collectExportMeshes(this.doc);
       if (!meshes.length) {
@@ -981,6 +1100,7 @@ export class Editor {
         return;
       }
       try {
+        await this.prepFigureMeshes(meshes);
         const merged = mergeGeos(meshes.map((m) => m.geo));
         const check = await this.booleans.check(merged);
         manifoldNote.textContent = check.manifold
@@ -990,6 +1110,19 @@ export class Editor {
         manifoldNote.textContent = 'Watertight check unavailable';
       }
     })();
+
+    // GLB option: ship the slider library as blendshapes (Blender-editable)
+    const glbOpts = el('div');
+    glbOpts.style.display = 'none';
+    if (hasFigures) {
+      const lab = el('label', 'jitter-label');
+      const cb = el('input') as HTMLInputElement;
+      cb.type = 'checkbox';
+      cb.checked = glbMorphs;
+      cb.addEventListener('change', () => (glbMorphs = cb.checked));
+      lab.append(cb, el('span', '', 'Body sliders as blendshapes + rig'));
+      glbOpts.appendChild(lab);
+    }
 
     content.appendChild(
       segmented(
@@ -1002,10 +1135,12 @@ export class Editor {
         (f) => {
           format = f;
           stlOpts.style.display = f === 'stl' ? '' : 'none';
+          glbOpts.style.display = f === 'glb' && hasFigures ? '' : 'none';
         }
       )
     );
     content.appendChild(stlOpts);
+    content.appendChild(glbOpts);
     content.appendChild(
       el(
         'p',
@@ -1031,13 +1166,21 @@ export class Editor {
         let blob: Blob;
         let filename: string;
         if (format === 'stl') {
+          await this.prepFigureMeshes(meshes);
           blob = exportSTL(meshes, mmPerUnit);
           filename = `${base}.stl`;
         } else if (format === 'obj') {
+          await this.prepFigureMeshes(meshes);
           blob = exportOBJ(meshes);
           filename = `${base}.obj`;
         } else {
-          blob = await exportGLB(meshes);
+          let figData: FigureGLBData | null = null;
+          let staticMeshes = meshes;
+          if (hasFigures && glbMorphs) {
+            figData = await this.buildFigureGLBData();
+            staticMeshes = meshes.filter((m) => !m.isFigure);
+          }
+          blob = await exportGLB(staticMeshes, figData ?? undefined);
           filename = `${base}.glb`;
         }
         t.close();
