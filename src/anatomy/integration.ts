@@ -18,8 +18,15 @@ import { BodyPanel, type BodyPanelHost } from './ui/bodypanel';
 import { FigureHandles } from './ui/handles';
 import { REGION_TO_GROUP } from './catalog';
 import { PRESET_BY_ID } from './presets';
+import type { PosePreset, PoseCategory, Vec3 } from './pose/schema';
+import { parsePresets, serializePresets } from './pose/schema';
+import { solvePose, type ParticipantRest, type SolveResult } from './pose/solver';
+import { SHIPPED_POSES } from './pose/library';
+import { blendPosePresets, mirrorPreset, rotateIds } from './pose/utils';
+import { extractPreset } from './pose/extract';
 
 const CUSTOM_PRESETS_KEY = 'sculptpad-custom-presets';
+const CUSTOM_POSES_KEY = 'sculptpad-custom-poses';
 
 export interface FigureManagerDeps {
   doc: Doc;
@@ -255,7 +262,17 @@ export class FigureManager {
         localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(list));
         toast(`Preset “${name}” saved`, { timeout: 1500 });
       },
-      customPresets: () => mgr.customPresetsRaw()
+      customPresets: () => mgr.customPresetsRaw(),
+      // pose library (scene-level)
+      poseLibrary: () => mgr.poseLibrary(),
+      applyPose: (p) => void mgr.applyPosePreset(p),
+      blendPoses: (a, b, t) => void mgr.blendPoses(a, b, t),
+      roleSwap: () => void mgr.roleSwap(),
+      mirrorPose: () => void mgr.mirrorLastPose(),
+      savePose: (name, category) => void mgr.saveCurrentAsPose(name, category),
+      importPoses: (json) => mgr.importPoseLibrary(json),
+      exportPoses: () => mgr.exportPoseLibrary(),
+      clearPose: () => void mgr.clearPose()
     };
   }
 
@@ -464,6 +481,239 @@ export class FigureManager {
     const topo = engine.topology;
     const region = topo && vertexIndex < topo.regions.length ? topo.regions[vertexIndex] : undefined;
     this.openPanel(id, region);
+  }
+
+  // ------------------------------------------------------------ pose system
+
+  private lastPoseApply: { preset: PosePreset; ids: string[] } | null = null;
+
+  /** Rest-state snapshot for the retargeting solver (pose-null compose). */
+  async restSnapshot(id: string): Promise<ParticipantRest | null> {
+    const rt = this.runtimes.get(id);
+    const c = this.charOf(id);
+    const engine = AnatomyEngine.shared();
+    await engine.ready();
+    const topo = engine.topology;
+    if (!rt || !c || !topo) return null;
+    const restChar = { ...c, pose: null };
+    const res = await rt.requestAndWait(restChar, !!this.deps.doc.settings.nsfwEnabled, null);
+    const landmarks: Record<string, Vec3> = {};
+    const landmarkSkin: ParticipantRest['landmarkSkin'] = {};
+    for (const [name, vi] of Object.entries(topo.landmarkVerts)) {
+      landmarks[name] = [
+        res.positions[vi * 3],
+        res.positions[vi * 3 + 1],
+        res.positions[vi * 3 + 2]
+      ];
+      landmarkSkin[name] = {
+        b: [topo.skinIndex[vi * 2], topo.skinIndex[vi * 2 + 1]],
+        w: [topo.skinWeight[vi * 2], topo.skinWeight[vi * 2 + 1]]
+      };
+    }
+    const m = res.measurements;
+    const bodyRadius = Math.max(
+      (m.shoulderCm / 200) * 0.85,
+      (m.chestCm / (200 * Math.PI)) * 1.15,
+      (m.hipCm / (200 * Math.PI)) * 1.2
+    );
+    // restore the live pose after the snapshot compose
+    this.recompose(id);
+    return {
+      joints: res.joints,
+      boneNames: topo.bones,
+      boneParent: topo.boneParent,
+      landmarks,
+      landmarkSkin,
+      bodyRadius,
+      height: m.heightCm / 100
+    };
+  }
+
+  /** Figures participating in a pose: selected figure is the anchor (role 0),
+   *  the rest follow document order. */
+  poseParticipants(count: number): string[] {
+    const figs = this.deps.doc.list().filter((o) => o.character).map((o) => o.id);
+    const sel = this.deps.getSelection();
+    if (sel && figs.includes(sel)) {
+      figs.splice(figs.indexOf(sel), 1);
+      figs.unshift(sel);
+    }
+    return figs.slice(0, count);
+  }
+
+  private yawOf(id: string): number {
+    const obj = this.deps.doc.get(id)!;
+    const [x, y, z, w] = obj.transform.quaternion;
+    // forward vector of the transform, projected to a yaw
+    const fx = 2 * (x * z + w * y);
+    const fz = 1 - 2 * (x * x + y * y);
+    return Math.atan2(fx, fz);
+  }
+
+  /** Retarget + apply a pose preset. Returns solver diagnostics. */
+  async applyPosePreset(
+    preset: PosePreset,
+    ids?: string[]
+  ): Promise<(SolveResult & { maxPenetration: number }) | null> {
+    const doc = this.deps.doc;
+    const use = ids ?? this.poseParticipants(preset.participants);
+    if (use.length < preset.participants) {
+      toast(`“${preset.name}” needs ${preset.participants} bodies (${use.length} in scene)`, { timeout: 2600 });
+      return null;
+    }
+    const rests: ParticipantRest[] = [];
+    for (const id of use) {
+      const r = await this.restSnapshot(id);
+      if (!r) return null;
+      rests.push(r);
+    }
+    const anchorObj = doc.get(use[0])!;
+    const result = solvePose(preset, rests, {
+      pos: [anchorObj.transform.position[0], 0, anchorObj.transform.position[2]],
+      yaw: this.yawOf(use[0])
+    });
+
+    // one undoable command across every participant — with freshly baked geo
+    // so exports/saves see the posed mesh, not a stale bake
+    interface PoseEntry {
+      id: string;
+      before: { t: SceneObjectData['transform']; c: CharacterParams; g: GeoData };
+      after: { t: SceneObjectData['transform']; c: CharacterParams; g: GeoData };
+    }
+    const entries: PoseEntry[] = [];
+    for (let i = 0; i < Math.min(preset.participants, use.length); i++) {
+      const id = use[i];
+      const obj = doc.get(id)!;
+      const before = { t: obj.transform, c: obj.character!, g: obj.geo };
+      const pl = result.placements[i];
+      const half = pl.yaw / 2;
+      const afterC = cloneCharacter(obj.character!);
+      afterC.pose = Object.fromEntries(
+        Object.entries(pl.rotations).filter(([, e]) => Math.hypot(...e) > 1e-4)
+      ) as Record<string, [number, number, number]>;
+      const rt = this.runtimes.get(id)!;
+      await rt.requestAndWait(afterC, !!doc.settings.nsfwEnabled, afterC.pose);
+      const afterG = rt.bakeGeoData()!;
+      entries.push({
+        id,
+        before,
+        after: {
+          t: {
+            position: [pl.pos[0], pl.pos[1], pl.pos[2]] as [number, number, number],
+            quaternion: [0, Math.sin(half), 0, Math.cos(half)] as [number, number, number, number],
+            scale: obj.transform.scale
+          },
+          c: afterC,
+          g: afterG
+        }
+      });
+    }
+    this.deps.history.push({
+      label: `Pose: ${preset.name}`,
+      do: () => {
+        for (const e of entries) {
+          doc.setTransform(e.id, e.after.t);
+          doc.setGeo(e.id, e.after.g);
+          doc.setCharacter(e.id, e.after.c);
+        }
+      },
+      undo: () => {
+        for (const e of entries) {
+          doc.setTransform(e.id, e.before.t);
+          doc.setGeo(e.id, e.before.g);
+          doc.setCharacter(e.id, e.before.c);
+        }
+      }
+    });
+    this.lastPoseApply = { preset, ids: use.slice(0, preset.participants) };
+    return { ...result, maxPenetration: entries.length > 1 ? result.maxPenetration : 0 };
+  }
+
+  /** Re-solve the last pose with participants rotated one role over. */
+  async roleSwap(): Promise<void> {
+    if (!this.lastPoseApply) {
+      toast('Apply a pose first', { timeout: 1400 });
+      return;
+    }
+    await this.applyPosePreset(this.lastPoseApply.preset, rotateIds(this.lastPoseApply.ids));
+  }
+
+  async mirrorLastPose(): Promise<void> {
+    if (!this.lastPoseApply) {
+      toast('Apply a pose first', { timeout: 1400 });
+      return;
+    }
+    await this.applyPosePreset(mirrorPreset(this.lastPoseApply.preset), this.lastPoseApply.ids);
+  }
+
+  async blendPoses(a: PosePreset, b: PosePreset, t: number): Promise<void> {
+    await this.applyPosePreset(blendPosePresets(a, b, t));
+  }
+
+  poseLibrary(): { shipped: PosePreset[]; custom: PosePreset[] } {
+    return { shipped: SHIPPED_POSES, custom: this.customPosesRaw() };
+  }
+
+  customPosesRaw(): PosePreset[] {
+    try {
+      return parsePresets(localStorage.getItem(CUSTOM_POSES_KEY) ?? '{"presets":[]}');
+    } catch {
+      return [];
+    }
+  }
+
+  /** Author a preset from the live scene (all figures, selected = anchor). */
+  async saveCurrentAsPose(name: string, category: PoseCategory): Promise<PosePreset | null> {
+    const ids = this.poseParticipants(Infinity);
+    if (!ids.length) return null;
+    const inputs = [];
+    for (const id of ids) {
+      const rest = await this.restSnapshot(id);
+      const obj = this.deps.doc.get(id);
+      if (!rest || !obj?.character) return null;
+      inputs.push({
+        rest,
+        pos: [obj.transform.position[0], obj.transform.position[1], obj.transform.position[2]] as Vec3,
+        yaw: this.yawOf(id),
+        rotations: (obj.character.pose ?? {}) as Record<string, Vec3>
+      });
+    }
+    // non-adult saves get their category from the participant count
+    const derived: PoseCategory =
+      category === 'nsfw' ? 'nsfw' : inputs.length === 1 ? 'solo' : inputs.length === 2 ? 'duo' : 'trio';
+    const preset = extractPreset(inputs, name, derived);
+    const list = this.customPosesRaw();
+    list.push(preset);
+    localStorage.setItem(CUSTOM_POSES_KEY, serializePresets(list));
+    toast(`Pose “${name}” saved (${preset.contacts.length} contacts extracted)`, { timeout: 2200 });
+    return preset;
+  }
+
+  exportPoseLibrary(): string {
+    return serializePresets(this.customPosesRaw());
+  }
+
+  importPoseLibrary(json: string): number {
+    const incoming = parsePresets(json);
+    const list = this.customPosesRaw();
+    // NSFW-categorized presets only land when the module is enabled
+    const usable = incoming.filter(
+      (p) => p.category !== 'nsfw' || this.deps.doc.settings.nsfwEnabled
+    );
+    list.push(...usable);
+    localStorage.setItem(CUSTOM_POSES_KEY, serializePresets(list));
+    return usable.length;
+  }
+
+  async clearPose(): Promise<void> {
+    const ids = this.poseParticipants(Infinity);
+    for (const id of ids) {
+      const c = this.charOf(id);
+      if (!c?.pose) continue;
+      const next = cloneCharacter(c);
+      next.pose = null;
+      await this.commitCharacter(id, next, 'Clear pose');
+    }
   }
 
   // ------------------------------------------------------------------ bake

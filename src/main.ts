@@ -89,6 +89,22 @@ function exposeTestHooks(): void {
       await editor!.figures.commitCharacter(id, next, `Blend ${a} × ${b}`);
       return true;
     },
+    // ---- pose system hooks ----
+    applyPoseById: async (poseId: string, ids?: string[]) => {
+      const { POSE_BY_ID } = await import('./anatomy/pose/library');
+      const p = POSE_BY_ID.get(poseId);
+      if (!p) throw new Error(`no pose ${poseId}`);
+      return editor!.figures.applyPosePreset(p, ids);
+    },
+    poseRoleSwap: () => editor!.figures.roleSwap(),
+    savePoseFromScene: (name: string, category: string) =>
+      editor!.figures.saveCurrentAsPose(name, category as never),
+    applyCustomPose: async (presetJson: string, ids?: string[]) => {
+      const { parsePresets } = await import('./anatomy/pose/schema');
+      const [p] = parsePresets(presetJson);
+      return editor!.figures.applyPosePreset(p, ids);
+    },
+    exportPoseJson: () => editor!.figures.exportPoseLibrary(),
     glbProbe: async () => {
       const { collectExportMeshes, exportGLB } = await import('./editor/exporter');
       const figData = await (editor as unknown as {

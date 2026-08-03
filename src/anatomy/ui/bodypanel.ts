@@ -1,11 +1,12 @@
 /** Body panel: the entire slider hierarchy with Procreate-grade ergonomics.
  *  Search, macro→region→micro accordions, presets + blend, randomize with
  *  per-region locks, measurements, pose check, anatomy-module toggle. */
-import { el } from '../../editor/ui';
+import { el, toast } from '../../editor/ui';
 import { GROUPS, MORPHS, type SliderGroup } from '../catalog';
 import { PRESETS, PRESET_BY_ID, blendPresets } from '../presets';
 import { TEST_POSES, type CharacterParams } from '../character';
 import type { Measurements } from '../engine';
+import type { PosePreset, PoseCategory } from '../pose/schema';
 
 export interface BodyPanelHost {
   getCharacter(): CharacterParams;
@@ -16,6 +17,16 @@ export interface BodyPanelHost {
   setNsfwEnabled(on: boolean): void;
   savePreset(name: string): void;
   customPresets(): { id: string; label: string; weights: Record<string, number> }[];
+  // pose library (scene-level: retargeting across all figures)
+  poseLibrary(): { shipped: PosePreset[]; custom: PosePreset[] };
+  applyPose(p: PosePreset): void;
+  blendPoses(a: PosePreset, b: PosePreset, t: number): void;
+  roleSwap(): void;
+  mirrorPose(): void;
+  savePose(name: string, category: PoseCategory): void;
+  importPoses(json: string): number;
+  exportPoses(): string;
+  clearPose(): void;
 }
 
 const CANON_SNAPS = [-1, -0.5, 0, 0.5, 1];
@@ -289,6 +300,7 @@ export class BodyPanel {
     this.content.appendChild(this.gateNotice);
 
     this.buildPresets();
+    this.buildPoseLibrary();
     this.buildRandomize();
     this.buildPose();
 
@@ -399,6 +411,157 @@ export class BodyPanel {
       }
     });
     body.appendChild(saveBtn);
+
+    wrap.append(head, body);
+    this.content.appendChild(wrap);
+  }
+
+  private buildPoseLibrary(): void {
+    const wrap = el('div', 'body-group');
+    const head = el('button', 'body-group-head');
+    head.append(el('span', '', 'Pose library'));
+    head.addEventListener('click', () => wrap.classList.toggle('open'));
+    const body = el('div', 'body-group-body');
+
+    let category: PoseCategory = 'solo';
+    const catRow = el('div', 'preset-chips');
+    const listRow = el('div', 'preset-chips pose-list');
+
+    const renderList = (): void => {
+      listRow.replaceChildren();
+      const lib = this.host.poseLibrary();
+      const all = [...lib.shipped, ...lib.custom].filter((p) => p.category === category);
+      if (!all.length) {
+        listRow.appendChild(
+          el(
+            'p',
+            'panel-note',
+            category === 'nsfw'
+              ? 'Empty — pose figures manually, then “Save scene as pose” with the Adult category.'
+              : 'No poses here yet.'
+          )
+        );
+        return;
+      }
+      for (const p of all) {
+        const chip = el('button', 'preset-chip', p.name);
+        chip.title = `${p.participants} participant${p.participants > 1 ? 's' : ''}`;
+        chip.addEventListener('click', () => this.host.applyPose(p));
+        listRow.appendChild(chip);
+      }
+    };
+
+    const cats: { id: PoseCategory; label: string }[] = [
+      { id: 'solo', label: 'Solo' },
+      { id: 'duo', label: 'Duo' },
+      { id: 'trio', label: 'Trio+' }
+    ];
+    if (this.host.nsfwEnabled()) cats.push({ id: 'nsfw', label: 'Adult' });
+    for (const cat of cats) {
+      const chip = el('button', 'preset-chip', cat.label);
+      if (cat.id === category) chip.classList.add('active');
+      chip.addEventListener('click', () => {
+        category = cat.id;
+        for (const x of catRow.children) x.classList.remove('active');
+        chip.classList.add('active');
+        renderList();
+      });
+      catRow.appendChild(chip);
+    }
+    renderList();
+    body.append(catRow, listRow);
+
+    // actions: mirror / role swap / clear
+    const actions = el('div', 'randomize-row');
+    const mk = (label: string, fn: () => void): void => {
+      const b = el('button', 'ghost-btn', label);
+      b.addEventListener('click', fn);
+      actions.appendChild(b);
+    };
+    mk('Mirror', () => this.host.mirrorPose());
+    mk('Swap roles', () => this.host.roleSwap());
+    mk('Rest', () => this.host.clearPose());
+    body.appendChild(actions);
+
+    // blend any two poses
+    const blendRow = el('div', 'blend-row');
+    const selA = el('select') as HTMLSelectElement;
+    const selB = el('select') as HTMLSelectElement;
+    const fillPoseSel = (sel: HTMLSelectElement): void => {
+      sel.replaceChildren();
+      const lib = this.host.poseLibrary();
+      for (const p of [...lib.shipped, ...lib.custom]) {
+        if (p.category === 'nsfw' && !this.host.nsfwEnabled()) continue;
+        const o = el('option', '', p.name) as HTMLOptionElement;
+        o.value = p.id;
+        sel.appendChild(o);
+      }
+    };
+    fillPoseSel(selA);
+    fillPoseSel(selB);
+    selB.selectedIndex = Math.min(1, selB.options.length - 1);
+    const blendSlider = el('input') as HTMLInputElement;
+    blendSlider.type = 'range';
+    blendSlider.min = '0';
+    blendSlider.max = '1';
+    blendSlider.step = '0.05';
+    blendSlider.value = '0.5';
+    blendSlider.addEventListener('change', () => {
+      const lib = this.host.poseLibrary();
+      const all = [...lib.shipped, ...lib.custom];
+      const a = all.find((p) => p.id === selA.value);
+      const b = all.find((p) => p.id === selB.value);
+      if (a && b) this.host.blendPoses(a, b, parseFloat(blendSlider.value));
+    });
+    blendRow.append(selA, el('span', 'blend-x', '×'), selB);
+    body.append(blendRow, blendSlider);
+
+    // authoring: save / import / export
+    const authorRow = el('div', 'randomize-row');
+    const save = el('button', 'ghost-btn', 'Save scene as pose');
+    save.addEventListener('click', () => {
+      const name = prompt('Pose name', 'My pose');
+      if (!name?.trim()) return;
+      // Adult tab saves into the gated category; otherwise the manager
+      // derives solo/duo/trio from the participant count
+      this.host.savePose(name.trim(), category);
+      renderList();
+      fillPoseSel(selA);
+      fillPoseSel(selB);
+    });
+    authorRow.appendChild(save);
+    const exp = el('button', 'ghost-btn', 'Export JSON');
+    exp.addEventListener('click', () => {
+      const json = this.host.exportPoses();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+      a.download = 'sculptpad-poses.json';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    });
+    authorRow.appendChild(exp);
+    const imp = el('button', 'ghost-btn', 'Import');
+    const file = el('input') as HTMLInputElement;
+    file.type = 'file';
+    file.accept = '.json,application/json';
+    file.style.display = 'none';
+    file.addEventListener('change', async () => {
+      const f = file.files?.[0];
+      if (!f) return;
+      try {
+        const n = this.host.importPoses(await f.text());
+        toast(`Imported ${n} pose${n === 1 ? '' : 's'}`, { timeout: 1800 });
+        renderList();
+        fillPoseSel(selA);
+        fillPoseSel(selB);
+      } catch (err) {
+        toast(`Import failed: ${err instanceof Error ? err.message : err}`, { timeout: 2600 });
+      }
+      file.value = '';
+    });
+    imp.addEventListener('click', () => file.click());
+    authorRow.append(imp, file);
+    body.appendChild(authorRow);
 
     wrap.append(head, body);
     this.content.appendChild(wrap);
