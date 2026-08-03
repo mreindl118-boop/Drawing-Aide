@@ -142,8 +142,31 @@ Legend: `[x]` implemented · `[ ]` open · **(iPad)** = must be verified on-devi
 - [x] Face-puppet handles: zooming to the face swaps the body handles for
       one-finger expression handles (brows, eyelids, mouth corners, chin/jaw,
       cheeks, nose) — bare-finger friendly, no Pencil needed
-- [ ] Ongoing: face fidelity iteration (features still clay-soft; next lever
-      is region-adaptive mesh density in the face patch)
+- [x] Skin-grade rendering pass: environment IBL + ACES + physical skin
+      material (sheen), per-preset skin tones (goblin green, elf pale, six
+      human tones), worker-computed crevice shading, painted per-vertex skin
+      features (vermilion lips, brow strokes, lash lines, subsurface blush) —
+      all as multipliers so every tone works; head mesh runs ~2.5× body
+      density so eye/lip-scale geometry resolves
+- [ ] Ongoing: face fidelity iteration. Procedural gaussian fields have hit
+      their ceiling for photorealism — remaining tells are the infraorbital
+      ring-crease, part-junction seams, and texture-less skin close up.
+- [ ] **Next phase — MakeHuman (CC0) mesh backend for photorealism.**
+      MakeHuman's assets (base mesh + all morph targets) are CC0 since 2020;
+      its architecture is identical to ours (fixed-topology base +
+      per-vertex offset targets), so the compose worker, slider catalog,
+      sculpt layer, GLB blendshapes, and pose retargeting carry over.
+      Verified fetchable from this environment:
+      `makehumancommunity/makehuman` → `data/3dobjs/base.obj` (19,158 verts,
+      13,380-vert body + helpers, CC0 header confirmed),
+      `data/targets/**` (per-vertex offset files), and
+      `data/modifiers/modeling_modifiers.json` (slider → target wiring).
+      Plan: (1) fetch + convert to a compact binary bundle (body-only mesh,
+      curated target set); (2) landmark/skeleton mapping onto MH vertex
+      indices; (3) dual-backend worker (procedural stays for toon/chibi);
+      (4) CC0 skin textures for true surface detail. Rejected: MB-Lab
+      (AGPL data, archived 2024), SMPL-X (non-commercial license).
+      Alternative worth watching: CharMorph's CC0/CC-BY base characters.
 - [ ] **(iPad)** slider drag at 60fps on-device; handles finger-sized; Pencil fine-drag
 
 ### Pose Library & Adaptive Retargeting (done)

@@ -43,6 +43,10 @@ let jointsOut: Float32Array;
 let adjOff: Uint32Array;
 let adjList: Uint32Array;
 let cavity: Float32Array;
+/** static per-vertex skin-feature tint (lips, brows, blush…) — multipliers
+ *  baked from the base mesh; vertices carry them through every morph */
+let featureTint: Float32Array;
+let tintOut: Float32Array;
 
 function bakeDir(def: MorphDef, dir: 'pos' | 'neg'): BakedDir | null {
   const spec = dir === 'pos' ? def.pos : def.neg;
@@ -79,6 +83,7 @@ function init(): void {
   normals = new Float32Array(basePos.length);
   jointsOut = new Float32Array(baseJoints.length);
   buildAdjacency();
+  bakeFeatureTint();
 }
 
 function buildAdjacency(): void {
@@ -102,6 +107,89 @@ function buildAdjacency(): void {
   }
   adjOff[vc] = k;
   cavity = new Float32Array(vc);
+  tintOut = new Float32Array(vc * 3);
+}
+
+/** Paint skin features as per-vertex color multipliers on the base mesh:
+ *  vermilion lips, brow strokes, lash-line darkening, subsurface blush on
+ *  cheeks/nose/ears/joints. Multipliers compose with any skin tone, so a
+ *  goblin keeps its green and an elf its pallor — features just read. */
+function bakeFeatureTint(): void {
+  const vc = topo.vertCount;
+  featureTint = new Float32Array(vc * 3).fill(1);
+  const L = landmarkBase;
+  const mul = (v: number, r: number, g: number, b: number, w: number): void => {
+    if (w <= 0) return;
+    featureTint[v * 3] *= 1 + (r - 1) * w;
+    featureTint[v * 3 + 1] *= 1 + (g - 1) * w;
+    featureTint[v * 3 + 2] *= 1 + (b - 1) * w;
+  };
+  const gauss = (d2: number, r: number): number => Math.exp(-d2 / (2 * r * r));
+  const d2To = (v: number, p: [number, number, number], sx = 1, sy = 1, sz = 1): number => {
+    const dx = (basePos[v * 3] - p[0]) / sx;
+    const dy = (basePos[v * 3 + 1] - p[1]) / sy;
+    const dz = (basePos[v * 3 + 2] - p[2]) / sz;
+    return dx * dx + dy * dy + dz * dz;
+  };
+  const mouth = L.mouth;
+  const cornerL = L.mouthCornerL;
+  const eyeL = L.eyeL;
+  const browL = L.browL;
+  for (let v = 0; v < vc; v++) {
+    // vermilion lips: band along the mouth line out to the corners
+    if (mouth && cornerL) {
+      const ax = Math.abs(basePos[v * 3]);
+      const halfW = cornerL[0] * 1.15;
+      const along = Math.min(1, ax / halfW);
+      const dy = basePos[v * 3 + 1] - (mouth[1] + 0.001 - along * along * 0.002);
+      const dz = basePos[v * 3 + 2] - mouth[2];
+      if (ax < halfW * 1.35 && dz > -0.02) {
+        const lipH = dy > 0 ? 0.0052 : 0.0058;
+        const w = Math.exp(-(dy * dy) / (2 * lipH * lipH)) * gauss(Math.max(0, ax - halfW) ** 2, 0.006) * Math.max(0, Math.min(1, (dz + 0.008) / 0.012));
+        mul(v, 1.22, 0.56, 0.5, Math.min(1, w * 0.95));
+      }
+    }
+    // brow strokes: tilted band riding the brow-bar crest
+    if (browL) {
+      for (const s of [1, -1]) {
+        const bx = browL[0] * s;
+        const dx = basePos[v * 3] - bx;
+        const dy = basePos[v * 3 + 1] - (browL[1] + 0.003 + dx * s * 0.18);
+        const dz = basePos[v * 3 + 2] - browL[2];
+        if (dz > -0.03) {
+          const w = Math.exp(-(dx * dx) / (2 * 0.014 * 0.014)) * Math.exp(-(dy * dy) / (2 * 0.0045 * 0.0045));
+          mul(v, 0.42, 0.35, 0.32, Math.min(1, w * 1.1));
+        }
+      }
+    }
+    // lash line + soft periorbital shading
+    if (eyeL) {
+      for (const s of [1, -1]) {
+        const p: [number, number, number] = [eyeL[0] * s, eyeL[1] + 0.0075, eyeL[2]];
+        const w = gauss(d2To(v, p, 1.6, 0.45, 1), 0.006);
+        mul(v, 0.62, 0.58, 0.58, w * 0.7);
+        const soft = gauss(d2To(v, [eyeL[0] * s, eyeL[1], eyeL[2]], 1.4, 1, 1), 0.014);
+        mul(v, 0.93, 0.9, 0.92, soft * 0.35);
+      }
+    }
+  }
+  // subsurface blush zones: warm scatter where skin is thin / blood is close
+  const blush: [string, number, number][] = [
+    ['cheekL', 0.032, 0.5], ['noseTip', 0.014, 0.55], ['earL', 0.02, 0.6],
+    ['chin', 0.02, 0.3], ['kneeL', 0.03, 0.3], ['elbowL', 0.025, 0.3],
+    ['heelL', 0.025, 0.35], ['mouthCornerL', 0.012, 0.4]
+  ];
+  for (const [name, r, strength] of blush) {
+    const p = L[name];
+    if (!p) continue;
+    for (const s of p[0] > 1e-6 ? [1, -1] : [1]) {
+      const q: [number, number, number] = [p[0] * s, p[1], p[2]];
+      for (let v = 0; v < vc; v++) {
+        const w = gauss(d2To(v, q), r) * strength;
+        if (w > 0.01) mul(v, 1.08, 0.93, 0.88, w);
+      }
+    }
+  }
 }
 
 /** Concavity = mean signed elevation of neighbors above the tangent plane:
@@ -381,10 +469,18 @@ function compose(req: ComposeReq): void {
   computeNormals();
   computeCavity();
 
+  // final vertex tint = baked skin features × live crevice shading
+  for (let v = 0; v < cavity.length; v++) {
+    const k = Math.min(1, Math.max(0, cavity[v] - 0.025) * 3.5);
+    tintOut[v * 3] = featureTint[v * 3] * (1 - 0.18 * k);
+    tintOut[v * 3 + 1] = featureTint[v * 3 + 1] * (1 - 0.28 * k);
+    tintOut[v * 3 + 2] = featureTint[v * 3 + 2] * (1 - 0.33 * k);
+  }
+
   const positions = work.slice();
   const norms = normals.slice();
   const joints = jointsOut.slice();
-  const cav = cavity.slice();
+  const tint = tintOut.slice();
   (self as unknown as Worker).postMessage(
     {
       type: 'composed',
@@ -392,11 +488,11 @@ function compose(req: ComposeReq): void {
       positions,
       normals: norms,
       joints,
-      cavity: cav,
+      tint,
       measurements: m,
       composeMs: performance.now() - t0
     },
-    [positions.buffer, norms.buffer, joints.buffer, cav.buffer]
+    [positions.buffer, norms.buffer, joints.buffer, tint.buffer]
   );
 }
 
