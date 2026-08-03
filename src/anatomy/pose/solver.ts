@@ -385,7 +385,7 @@ export function solvePose(
       // safety clamp: no body part digs below the floor (raise only)
       const f2 = fk(p);
       let low = Infinity;
-      for (const lm of ['heelL', 'heelR', 'toeL', 'toeR', 'kneeL', 'kneeR', 'gluteApex', 'palmL', 'palmR']) {
+      for (const lm of ['heelL', 'heelR', 'toeL', 'toeR', 'kneeL', 'kneeR', 'gluteApex', 'palmL', 'palmR', 'handTipL', 'handTipR', 'wristL', 'wristR']) {
         const w = landmarkWorld(p, f2, lm);
         if (w) low = Math.min(low, w[1]);
       }

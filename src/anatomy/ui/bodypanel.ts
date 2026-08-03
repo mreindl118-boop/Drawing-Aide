@@ -315,11 +315,14 @@ export class BodyPanel {
   private buildGroup(id: SliderGroup, label: string): HTMLElement {
     const wrap = el('div', 'body-group');
     const head = el('button', 'body-group-head');
-    const lock = el('button', 'body-lock', '🔓');
+    // expressions are transient — locked against randomize by default
+    const startLocked = id === 'expression';
+    const lock = el('button', 'body-lock', startLocked ? '🔒' : '🔓');
+    if (startLocked) lock.classList.add('locked');
     lock.title = 'Lock group against randomize';
     head.append(el('span', '', label), el('span', 'flex-spacer'), lock);
     const body = el('div', 'body-group-body');
-    const entry = { wrap, body, locked: false };
+    const entry = { wrap, body, locked: startLocked };
     lock.addEventListener('click', (e) => {
       e.stopPropagation();
       entry.locked = !entry.locked;
@@ -328,6 +331,25 @@ export class BodyPanel {
     });
     head.addEventListener('click', () => wrap.classList.toggle('open'));
     wrap.append(head, body);
+    if (id === 'expression') {
+      // one-tap expression bundles above the fine sliders
+      const chips = el('div', 'preset-chips');
+      void import('../expressions').then(({ EXPRESSION_PRESETS, EXPRESSIONS }) => {
+        for (const p of EXPRESSION_PRESETS) {
+          const chip = el('button', 'preset-chip', p.label);
+          chip.addEventListener('click', () => {
+            const c = this.host.getCharacter();
+            const weights = { ...c.weights };
+            for (const e of EXPRESSIONS) weights[e.id] = 0; // reset, then apply
+            Object.assign(weights, p.weights);
+            this.host.applyWeights(weights, c.sideWeights, true, `Expression: ${p.label}`);
+            this.syncAll();
+          });
+          chips.appendChild(chip);
+        }
+      });
+      body.appendChild(chips);
+    }
     for (const m of MORPHS.filter((m) => m.group === id)) {
       const w = new SliderWidget(m.id, m.label, m.bipolar, this);
       this.widgets.set(m.id, w);
