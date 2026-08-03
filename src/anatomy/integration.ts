@@ -355,6 +355,24 @@ export class FigureManager {
     });
   }
 
+  /** Current handle layer, or null while handles are hidden (test probe). */
+  handleMode(): 'body' | 'face' | null {
+    return this.handles?.visible ? this.handles.mode : null;
+  }
+
+  /** Per-frame: keep handle size and the body/face layer in sync with zoom
+   *  (the face-puppet handles take over as the camera closes in). */
+  frameTick(): boolean {
+    if (!this.handles?.visible || !this.panelFor) return false;
+    const d = this.deps.rig.dist;
+    if (Math.abs(d - this.lastHandleDist) < 1e-4) return false;
+    this.lastHandleDist = d;
+    this.updateHandles(this.panelFor);
+    return true;
+  }
+
+  private lastHandleDist = -1;
+
   private updateHandles(id: string): void {
     if (!this.handles?.visible || this.panelFor !== id) return;
     const rt = this.runtimes.get(id);
@@ -417,7 +435,7 @@ export class FigureManager {
     this.handleDrag = null;
     const pendingC = this.pending.get(id);
     if (pendingC) {
-      void this.commitCharacter(id, pendingC, `Adjust ${slider.replace(/_/g, ' ')}`);
+      void this.commitCharacter(id, pendingC, `Adjust ${slider.replace(/^exp_/, '').replace(/_/g, ' ')}`);
     }
   }
 

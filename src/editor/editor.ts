@@ -154,7 +154,8 @@ export class Editor {
       const busy = this.gizmo.update();
       this.quickshape.update();
       this.updateFreeDragSnap();
-      return busy;
+      const handlesMoved = this.figures.frameTick();
+      return busy || handlesMoved;
     };
 
     this.doc.on((e) => {

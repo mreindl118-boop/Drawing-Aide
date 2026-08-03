@@ -73,6 +73,12 @@ function exposeTestHooks(): void {
     setBodyPose: (id: string, pose: Record<string, [number, number, number]> | null) =>
       editor!.figures.setPose(id, pose),
     bodyMeasurements: (id: string) => editor!.figures.measurementsOf(id),
+    handleModeAt: (dist: number) => {
+      editor!.rig.dist = dist;
+      editor!.rig.apply();
+      editor!.figures.frameTick();
+      return editor!.figures.handleMode();
+    },
     bodyComposeProbe: (id: string, n?: number) => editor!.figures.composeProbe(id, n),
     bakeBody: (id: string) => editor!.figures.bakeFigure(id),
     applyPresetBlend: async (id: string, a: string, b: string, t: number) => {

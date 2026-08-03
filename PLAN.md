@@ -26,6 +26,7 @@ Legend: `[x]` implemented · `[ ]` open · **(iPad)** = must be verified on-devi
 - [x] Grid + axes, studio lighting, matcap toggle
 - [x] Orbit / zoom (dolly) / pan / roll camera rig (trackball-style, framed reset)
 - [x] Touch: 2-finger drag = orbit · pinch = zoom · 2-finger twist = roll · 3-finger drag = pan
+      (grab-the-world convention: the model follows the fingers, like pan)
 - [x] 2-finger tap = undo · 3-finger tap = redo
 - [x] Mouse: LMB tool · right-drag / MMB = orbit · shift+drag or shift+wheel = pan · wheel = zoom
 - [x] Keyboard: Cmd/Ctrl+Z, Shift+Cmd+Z, `[` `]` size, `S` symmetry, `Tab` tool switch, `W/E/R` gizmo modes, `F` frame, `?` shortcut overlay
@@ -138,6 +139,9 @@ Legend: `[x]` implemented · `[ ]` open · **(iPad)** = must be verified on-devi
 - [x] Expression system: 11 expression sliders (smile, jaw, pucker, brows,
       eyes, squint, sneer, cheek puff, pout) + identity micros, one-tap
       expression bundles, per-side unlink (winks), GLB blendshape export
+- [x] Face-puppet handles: zooming to the face swaps the body handles for
+      one-finger expression handles (brows, eyelids, mouth corners, chin/jaw,
+      cheeks, nose) — bare-finger friendly, no Pencil needed
 - [ ] Ongoing: face fidelity iteration (features still clay-soft; next lever
       is region-adaptive mesh density in the face patch)
 - [ ] **(iPad)** slider drag at 60fps on-device; handles finger-sized; Pencil fine-drag

@@ -234,17 +234,19 @@ export class PointerGestures {
       const prevDist = Math.hypot(prevAx - prevBx, prevAy - prevBy);
       const prevAng = Math.atan2(prevBy - prevAy, prevBx - prevAx);
 
-      // each event carries one pointer's movement; the midpoint moves half that
+      // each event carries one pointer's movement; the midpoint moves half that.
+      // Touch uses the grab-the-world convention: content follows the fingers
+      // (inverted relative to mouse orbit), matching how pan already feels.
       const midDx = (p.x - prev.x) / 2;
       const midDy = (p.y - prev.y) / 2;
-      this.h.orbit(midDx, midDy);
+      this.h.orbit(-midDx, -midDy);
       if (prevDist > 20 && curDist > 20) {
         this.h.dolly(prevDist / curDist);
       }
       let dAng = curAng - prevAng;
       if (dAng > Math.PI) dAng -= 2 * Math.PI;
       if (dAng < -Math.PI) dAng += 2 * Math.PI;
-      if (Math.abs(dAng) < 0.3) this.h.roll(dAng);
+      if (Math.abs(dAng) < 0.3) this.h.roll(-dAng);
     }
   };
 

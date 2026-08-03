@@ -64,6 +64,18 @@ try {
     m0 ? `${m0.heightCm.toFixed(0)}cm, ${m0.headUnits.toFixed(1)} heads` : 'none'
   );
 
+  // ---- on-model handles: body layer when framing, face-puppet layer close up
+  await page.waitForFunction(() => window.__sculptpad.handleModeAt(2.2) === 'body', null, { timeout: 10000 }).catch(() => {});
+  const handleModes = await page.evaluate(() => {
+    const sp = window.__sculptpad;
+    const far = sp.handleModeAt(2.2);
+    const near = sp.handleModeAt(0.7);
+    sp.handleModeAt(2.2); // restore body framing for the rest of the suite
+    return { far, near };
+  });
+  check('body handles at figure framing', handleModes.far === 'body', String(handleModes.far));
+  check('face-puppet handles when zoomed to the face', handleModes.near === 'face', String(handleModes.near));
+
   // ---- slider moves change the mesh + measurements live
   await page.evaluate((id) => window.__sculptpad.setBodyWeights(id, { height: 1 }), figId);
   const mTall = await page.evaluate((id) => window.__sculptpad.bodyMeasurements(id), figId);

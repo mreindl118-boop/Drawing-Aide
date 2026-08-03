@@ -462,6 +462,7 @@ export function emitBody(P: GenParams, em: Emitter): {
   landmarks.cheekL = [P.headW * 0.8, eyeY - 0.035, hz + P.headDf * 0.45];
   landmarks.jawSideL = [P.jawW, hb + 0.02, hz + 0.008];
   landmarks.mouth = [0, hb + 0.048, hz + P.jawDf * 1.05];
+  landmarks.mouthCornerL = [0.021, hb + 0.048, hz + P.jawDf * 0.92];
   landmarks.earL = [P.headW, eyeY - 0.012, hz - 0.012];
   landmarks.foreheadC = [0, hb + 0.14, hz + P.headDf * 0.9];
 
