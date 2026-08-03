@@ -3,9 +3,19 @@
  *  math off the main thread — delta composition, sculpt layer, CPU skinning
  *  for pose preview, normals, measurements. */
 import { BASE_PARAMS, patched } from './params';
-import { buildTopology, generateBody, BONES, BONE_PARENT, type Topology } from './generate';
+import {
+  buildTopology,
+  generateBody,
+  BONES,
+  BONE_PARENT,
+  TORSO_RADIAL,
+  TORSO_SUBDIV,
+  TORSO_STATION,
+  type Topology
+} from './generate';
 import { MORPHS, type MorphDef } from './catalog';
 import { bakeFields } from './fields';
+import { BASE_DETAIL } from './detail';
 
 interface BakedDir {
   delta: Float32Array;
@@ -22,6 +32,8 @@ let basePos: Float32Array;
 let baseJoints: Float32Array;
 let baked = new Map<string, BakedMorph>();
 let landmarkBase: Record<string, [number, number, number]>;
+/** always-on anatomical surface detail (face, clavicles, abs, creases…) */
+let detailDelta: Float32Array;
 
 // scratch buffers (reused every compose)
 let work: Float32Array;
@@ -57,6 +69,8 @@ function init(): void {
       neg: bakeDir(def, 'neg')
     });
   }
+  detailDelta = new Float32Array(basePos.length);
+  bakeFields(BASE_DETAIL, basePos, landmarkBase, detailDelta);
   work = new Float32Array(basePos.length);
   normals = new Float32Array(basePos.length);
   jointsOut = new Float32Array(baseJoints.length);
@@ -122,13 +136,13 @@ interface Measurements {
   gated: boolean;
 }
 
-const TORSO_RADIAL = 33; // 32 + seam duplicate
+const RING_VERTS = TORSO_RADIAL + 1; // seam vertex duplicated
 
-function ringCircumference(partName: string, station: number, subdiv: number): number {
+function ringCircumference(partName: string, station: number): number {
   const part = topo.parts.find((p) => p.name === partName)!;
-  const ringStart = part.vStart + station * subdiv * TORSO_RADIAL;
+  const ringStart = part.vStart + station * TORSO_SUBDIV * RING_VERTS;
   let len = 0;
-  for (let k = 0; k < TORSO_RADIAL - 1; k++) {
+  for (let k = 0; k < RING_VERTS - 1; k++) {
     const a = (ringStart + k) * 3;
     const b = (ringStart + k + 1) * 3;
     len += Math.hypot(work[b] - work[a], work[b + 1] - work[a + 1], work[b + 2] - work[a + 2]);
@@ -159,9 +173,13 @@ function measure(): Measurements {
     heightCm: height * 100,
     headUnits: height / headH,
     shoulderCm: shoulderSpan * 100,
-    chestCm: ringCircumference('torso', 6, 3) * 100,
-    waistCm: ringCircumference('torso', 4, 3) * 100,
-    hipCm: Math.max(ringCircumference('torso', 1, 3), ringCircumference('torso', 2, 3)) * 100,
+    chestCm: ringCircumference('torso', TORSO_STATION.chest) * 100,
+    waistCm: ringCircumference('torso', TORSO_STATION.waist) * 100,
+    hipCm:
+      Math.max(
+        ringCircumference('torso', TORSO_STATION.glute),
+        ringCircumference('torso', TORSO_STATION.hip)
+      ) * 100,
     inseamCm: (thighY - ankleY + 0.07) * 100,
     gated: false
   };
@@ -273,6 +291,7 @@ function computeNormals(): void {
 function compose(req: ComposeReq): void {
   const t0 = performance.now();
   work.set(basePos);
+  for (let i = 0; i < work.length; i++) work[i] += detailDelta[i];
   jointsOut.set(baseJoints);
 
   // pass 1: everything except the anatomy module

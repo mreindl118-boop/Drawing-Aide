@@ -9,10 +9,17 @@
 import type { GenParams, ParamPatch } from './params';
 import { scaleHeights } from './params';
 import type { FieldOp } from './fields';
+import { DEFINITION_FIELDS, SOFT_FIELDS } from './detail';
+import { EXPRESSIONS } from './expressions';
+
+/** reuse a field set at reduced amplitude (macros borrow the detail layers) */
+const scaled = (fields: FieldOp[], s: number): FieldOp[] =>
+  fields.map((op) => ({ ...op, amp: op.amp * s }));
 
 export type SliderGroup =
   | 'macro'
   | 'head'
+  | 'expression'
   | 'neck'
   | 'torso'
   | 'waist'
@@ -107,7 +114,7 @@ export const MORPHS: MorphDef[] = [
         waistW: P.waistW * 0.98, ribW: P.ribW * 1.06, neckR: P.neckR * 1.15,
         torsoN: P.torsoN + 0.35, limbN: P.limbN + 0.15
       }),
-      fields: [f('bustL', 0.06, 0.008, [0, 0, 1])]
+      fields: [f('bustL', 0.06, 0.008, [0, 0, 1]), ...scaled(DEFINITION_FIELDS, 0.45)]
     },
     neg: {
       params: (P) => ({
@@ -130,7 +137,11 @@ export const MORPHS: MorphDef[] = [
         jawW: P.jawW * 1.12, jawDf: P.jawDf * 1.15, chinDrop: P.chinDrop * 0.5,
         waistN: P.waistN - 0.3, torsoN: P.torsoN - 0.25, calfR: P.calfR * 1.08
       }),
-      fields: [fc('bellyFront', 0.1, 0.03, [0, -0.25, 1]), f('cheekL', 0.045, 0.008, [1, -0.3, 0.4])]
+      fields: [
+        fc('bellyFront', 0.1, 0.03, [0, -0.25, 1]),
+        f('cheekL', 0.045, 0.008, [1, -0.3, 0.4]),
+        ...scaled(SOFT_FIELDS, 0.5)
+      ]
     },
     neg: {
       params: (P) => ({
@@ -154,7 +165,15 @@ export const MORPHS: MorphDef[] = [
         forearmR: P.forearmR * 0.9, thighR: P.thighR * 0.93, calfR: P.calfR * 0.9,
         waistDf: P.waistDf * 1.18, gluteRound: P.gluteRound * 0.88
       }),
-      fields: [fc('bellyFront', 0.08, 0.014, [0, -0.3, 1])]
+      fields: [
+        fc('bellyFront', 0.08, 0.014, [0, -0.3, 1]),
+        // jowls, soft chin, sunken cheeks, deepened sockets
+        f('jawSideL', 0.02, 0.006, [0.4, -0.7, 0.4], { offset: [-0.004, -0.014, 0.006] }),
+        fc('chin', 0.02, 0.005, [0, -0.5, 0.7], { offset: [0, -0.012, -0.006] }),
+        f('cheekL', 0.026, -0.005, [0.6, 0, 0.6], { offset: [-0.002, -0.018, 0.004] }),
+        f('eyeL', 0.018, -0.0028, [0, 0, 1], { stretch: [1.3, 1, 1] }),
+        ...scaled(SOFT_FIELDS, 0.22)
+      ]
     },
     neg: {
       params: (P) => ({ torsoN: P.torsoN + 0.1, upperChestZ: P.upperChestZ + 0.006 })
@@ -312,6 +331,28 @@ export const MORPHS: MorphDef[] = [
   { id: 'lip_fullness', label: 'Lip fullness', group: 'head', bipolar: true,
     pos: { fields: [fc('mouth', 0.017, 0.006, [0, 0, 1])] },
     neg: { fields: [fc('mouth', 0.017, -0.004, [0, 0, 1])] } },
+  { id: 'eye_depth', label: 'Eye depth', group: 'head', bipolar: true,
+    pos: { fields: [f('eyeL', 0.018, -0.004, [0, 0, 1], { stretch: [1.3, 0.9, 1] })] },
+    neg: { fields: [f('eyeL', 0.018, 0.0035, [0, 0, 1], { stretch: [1.3, 0.9, 1] })] } },
+  { id: 'nostril_flare', label: 'Nostril flare', group: 'head', bipolar: true,
+    pos: { fields: [f('noseTip', 0.01, 0.005, 'out', { offset: [0.012, -0.01, -0.005], k: 2.8 })] },
+    neg: { fields: [f('noseTip', 0.01, -0.0035, 'out', { offset: [0.012, -0.01, -0.005], k: 2.8 })] } },
+  { id: 'mouth_height', label: 'Mouth height', group: 'head', bipolar: true,
+    pos: { fields: [fc('mouth', 0.02, 0.006, [0, 1, 0], { stretch: [1.4, 1, 1] })] },
+    neg: { fields: [fc('mouth', 0.02, -0.006, [0, 1, 0], { stretch: [1.4, 1, 1] })] } },
+  { id: 'jaw_forward', label: 'Jaw forward (under ↔ over)', group: 'head', bipolar: true,
+    pos: { fields: [fc('chin', 0.03, 0.008, [0, 0, 1], { stretch: [1.3, 1, 1] }), fc('mouth', 0.014, 0.004, [0, 0, 1], { offset: [0, -0.006, 0] })] },
+    neg: { fields: [fc('chin', 0.03, -0.007, [0, 0, 1], { stretch: [1.3, 1, 1] })] } },
+
+  // ============================================== EXPRESSIONS (rig-ready)
+  ...EXPRESSIONS.map((e): MorphDef => ({
+    id: e.id,
+    label: e.label,
+    group: 'expression',
+    bipolar: e.bipolar,
+    pos: { fields: e.pos },
+    ...(e.neg ? { neg: { fields: e.neg } } : {})
+  })),
 
   // ================================================================== NECK
   { id: 'neck_girth', label: 'Neck girth', group: 'neck', bipolar: true,
@@ -442,6 +483,18 @@ export const MORPHS: MorphDef[] = [
     pos: { params: (P) => ({ footW: P.footW * 1.2 }) },
     neg: { params: (P) => ({ footW: P.footW * 0.82 }) } },
 
+  // ==================================================== SURFACE DETAIL
+  { id: 'muscle_definition', label: 'Muscle definition', group: 'macro', bipolar: false,
+    pos: { fields: DEFINITION_FIELDS } },
+  { id: 'soft_folds', label: 'Soft folds', group: 'macro', bipolar: false,
+    pos: { fields: SOFT_FIELDS } },
+  { id: 'traps', label: 'Trapezius', group: 'torso', bipolar: true,
+    pos: { fields: [
+      f('neckBase', 0.042, 0.009, [0, 1, -0.25], { offset: [0.045, 0.008, -0.014], stretch: [1.4, 0.85, 1] }),
+      f('neckBase', 0.03, 0.005, [0.3, 0.6, -0.4], { offset: [0.07, -0.01, -0.01] })
+    ] },
+    neg: { fields: [f('neckBase', 0.04, -0.005, [0, 1, -0.25], { offset: [0.045, 0.005, -0.014] })] } },
+
   // ============================================================ RACE MORPHS
   { id: 'ear_length', label: 'Ear length (elf)', group: 'race', bipolar: false,
     pos: { fields: [f('earL', 0.03, 0.022, [0.5, 0.75, -0.35], { offset: [0.008, 0.012, -0.008], stretch: [1, 1.4, 1] })] } },
@@ -475,6 +528,7 @@ export const MORPH_BY_ID = new Map(MORPHS.map((m) => [m.id, m]));
 export const GROUPS: { id: SliderGroup; label: string }[] = [
   { id: 'macro', label: 'Macro' },
   { id: 'head', label: 'Head & face' },
+  { id: 'expression', label: 'Expression' },
   { id: 'neck', label: 'Neck' },
   { id: 'torso', label: 'Shoulders & chest' },
   { id: 'waist', label: 'Waist, hips & glutes' },

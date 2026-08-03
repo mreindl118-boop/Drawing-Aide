@@ -1029,7 +1029,15 @@ export class Editor {
       const { names, arrays } = await engine.getDeltas(!!this.doc.settings.nsfwEnabled);
       const { generateBody } = await import('../anatomy/generate');
       const { BASE_PARAMS } = await import('../anatomy/params');
-      const basePositions = generateBody(BASE_PARAMS).positions;
+      const { bakeFields } = await import('../anatomy/fields');
+      const { BASE_DETAIL } = await import('../anatomy/detail');
+      const gen = generateBody(BASE_PARAMS);
+      const basePositions = gen.positions.slice();
+      // exported base carries the always-on surface-detail layer, matching
+      // what the engine renders
+      const detail = new Float32Array(basePositions.length);
+      bakeFields(BASE_DETAIL, gen.positions, gen.landmarks, detail);
+      for (let i = 0; i < basePositions.length; i++) basePositions[i] += detail[i];
       const instances = figs.map((o) => {
         const c = o.character!;
         const influences = names.map((n) => {
