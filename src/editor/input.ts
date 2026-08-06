@@ -59,6 +59,20 @@ export class PointerGestures {
   private maxTouches = 0;
   private gestureStartT = 0;
   private penDown = false;
+  // two-finger disambiguation: decaying accumulators of pinch (finger-distance
+  // change) vs travel (midpoint movement) decide which intent dominates, and
+  // roll only engages after a deliberate cumulative twist
+  private pinchAccum = 0;
+  private travelAccum = 0;
+  private twistAccum = 0;
+  private rollEngaged = false;
+
+  private resetNavIntent(): void {
+    this.pinchAccum = 0;
+    this.travelAccum = 0;
+    this.twistAccum = 0;
+    this.rollEngaged = false;
+  }
 
   constructor(
     private el: HTMLElement,
@@ -93,7 +107,11 @@ export class PointerGestures {
   }
 
   private onDown = (e: PointerEvent): void => {
-    this.el.setPointerCapture?.(e.pointerId);
+    try {
+      this.el.setPointerCapture?.(e.pointerId);
+    } catch {
+      // synthetic events (tests) have no active pointer to capture
+    }
     const p: Ptr = {
       id: e.pointerId,
       type: e.pointerType,
@@ -162,6 +180,7 @@ export class PointerGestures {
       if (this.strokeId === null) {
         this.navCount = Math.min(3, n);
         this.navMoved = false;
+        this.resetNavIntent();
       }
     }
   };
@@ -235,18 +254,41 @@ export class PointerGestures {
       const prevAng = Math.atan2(prevBy - prevAy, prevBx - prevAx);
 
       // each event carries one pointer's movement; the midpoint moves half that.
-      // Touch uses the grab-the-world convention: content follows the fingers
-      // (inverted relative to mouse orbit), matching how pan already feels.
       const midDx = (p.x - prev.x) / 2;
       const midDy = (p.y - prev.y) / 2;
-      this.h.orbit(-midDx, -midDy);
+
+      // ---- intent: a natural pinch always drifts and twists a little, so
+      // orbit/roll must not fire at full strength during a zoom. Decaying
+      // accumulators compare finger-distance change against midpoint travel.
+      const distDelta = Math.abs(curDist - prevDist);
+      this.pinchAccum = this.pinchAccum * 0.9 + distDelta;
+      this.travelAccum = this.travelAccum * 0.9 + Math.hypot(midDx, midDy);
+      const pinchDominant = this.pinchAccum > 1.5 * this.travelAccum + 6;
+
+      // zoom: always live (spread = zoom in), it's what both intents expect
       if (prevDist > 20 && curDist > 20) {
         this.h.dolly(prevDist / curDist);
       }
+
+      // orbit: grab-the-world (content follows the fingers), heavily damped
+      // while the pinch dominates so zooming doesn't tumble the model
+      const orbitScale = pinchDominant ? 0.12 : 1;
+      this.h.orbit(-midDx * orbitScale, -midDy * orbitScale);
+
+      // roll: only after a deliberate cumulative twist (~12°) — incidental
+      // angle jitter during a pinch must never tilt the horizon
       let dAng = curAng - prevAng;
       if (dAng > Math.PI) dAng -= 2 * Math.PI;
       if (dAng < -Math.PI) dAng += 2 * Math.PI;
-      if (Math.abs(dAng) < 0.3) this.h.roll(-dAng);
+      if (Math.abs(dAng) < 0.3) {
+        this.twistAccum += dAng;
+        if (!this.rollEngaged && Math.abs(this.twistAccum) > 0.21 && !pinchDominant) {
+          this.rollEngaged = true;
+          this.h.roll(-this.twistAccum); // apply the buffered twist for continuity
+        } else if (this.rollEngaged) {
+          this.h.roll(-dAng);
+        }
+      }
     }
   };
 
@@ -281,6 +323,7 @@ export class PointerGestures {
         this.navCount = 0;
         this.navMoved = false;
         this.maxTouches = 0;
+        this.resetNavIntent();
       } else if (remaining < this.navCount) {
         this.navCount = remaining >= 2 ? remaining : 0;
       }
@@ -298,6 +341,7 @@ export class PointerGestures {
       this.navCount = 0;
       this.navMoved = false;
       this.maxTouches = 0;
+      this.resetNavIntent();
     }
   };
 
