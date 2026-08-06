@@ -1,10 +1,18 @@
 # SculptPad
 
-A Procreate-feeling 3D asset studio: fast, touch-first, opinionated — not a
-Blender clone. Runs as an installable PWA on iPad Safari with full Apple Pencil
-support, and with complete mouse + keyboard parity in desktop browsers.
-Sculpt, block out, pose, and paint 3D assets, then export for 3D printing
-(STL), Blender (GLB/OBJ), and Procreate 3D Paint (OBJ with UVs).
+**Open-source, touch-first 3D character & asset studio.**
+A Procreate-feeling tool — fast, opinionated, not a Blender clone. Runs as an
+installable PWA on iPad Safari with full Apple Pencil support, and with
+complete mouse + keyboard parity in desktop browsers. Build characters on a
+professionally sculpted human base mesh with 100+ anatomy sliders, pose
+multi-figure scenes, dial in facial expressions, then export for 3D printing
+(STL), Blender (GLB with blendshapes + rig), and Procreate 3D Paint (OBJ).
+
+**Live app:** https://mreindl118-boop.github.io/Drawing-Aide/
+
+Licensed [MIT](LICENSE). Figure mesh & morph data converted from the
+[MakeHuman](https://github.com/makehumancommunity/makehuman) project's CC0
+assets — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Current status: **Phase 1 — Blockout & primitives.** See [PLAN.md](PLAN.md)
 for the full roadmap and per-phase checklists.
@@ -45,6 +53,15 @@ Keys: `W/E/R` gizmo modes · `Tab` cycle tool · `[` `]` size · `S` symmetry ·
 In Move mode, dragging empty space orbits (tap empty space to deselect).
 
 ## Deploy
+
+**GitHub Pages** (how the live app above is published):
+
+```sh
+npx vite build --base=/Drawing-Aide/   # or your repo name
+# push dist/ (+ a .nojekyll file) to the gh-pages branch
+```
+
+**Cloudflare Pages** (alternative):
 
 ```sh
 npm run deploy        # build + publish to Cloudflare Pages + print the URL

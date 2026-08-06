@@ -26,7 +26,7 @@ export default defineConfig(async () => {
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,wasm,woff2}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,wasm,woff2,bin}'],
         // manifold WASM is a few MB; make sure it precaches for offline use
         maximumFileSizeToCacheInBytes: 24 * 1024 * 1024
       }

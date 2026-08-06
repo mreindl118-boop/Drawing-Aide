@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Touch-first 3D asset studio for iPad (PWA) — blockout, sculpt, pose, paint, export.",
+  "description": "Touch-first 3D asset studio for iPad (PWA) \u2014 blockout, sculpt, pose, paint, export.",
   "scripts": {
     "dev": "vite",
     "dev:lan": "vite --host",
@@ -16,7 +16,8 @@
     "smoke:anatomy": "node scripts/anatomy-smoke.mjs",
     "deploy": "node scripts/deploy.mjs",
     "smoke:update": "node scripts/update-smoke.mjs",
-    "smoke:pose": "node scripts/pose-smoke.mjs"
+    "smoke:pose": "node scripts/pose-smoke.mjs",
+    "deploy:pages": "node scripts/deploy-pages.mjs"
   },
   "dependencies": {
     "idb": "^8.0.2",
