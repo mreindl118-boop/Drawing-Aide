@@ -1,119 +1,98 @@
-# SculptPad
+# Drawing Aide
 
-**Open-source, touch-first 3D character & asset studio.**
-A Procreate-feeling tool — fast, opinionated, not a Blender clone. Runs as an
-installable PWA on iPad Safari with full Apple Pencil support, and with
-complete mouse + keyboard parity in desktop browsers. Build characters on a
-professionally sculpted human base mesh with 100+ anatomy sliders, pose
-multi-figure scenes, dial in facial expressions, then export for 3D printing
-(STL), Blender (GLB with blendshapes + rig), and Procreate 3D Paint (OBJ).
+Turn a photo into a painting. Pick a style, set the block or shape size, and Drawing Aide renders the
+painting. For the block style it also gives you a paint-by-number sheet so you can paint it for real.
 
-**Live app:** https://mreindl118-boop.github.io/Drawing-Aide/
+![The four styles on a NASA portrait](examples/styles_preview.jpg)
 
-Licensed [MIT](LICENSE). Figure mesh & morph data converted from the
-[MakeHuman](https://github.com/makehumancommunity/makehuman) project's CC0
-assets — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+| Style | What it looks like | `--size` means |
+|---|---|---|
+| `blocks` | 1-inch knife-painted blocks on a pink (or white) grid, like a hand-painted pixel portrait | block size in inches, 0.5 to 3 (default 1) |
+| `minimal` | a few flat, softly rounded colour fields | shape size 1 to 10 (default 4) |
+| `cubist` | straight-edged fractured planes, each lit differently, dark contours | plane size 1 to 10 (default 4) |
+| `pointillist` | dabs of boosted, hue-shifted colour | dot size 1 to 10 (default 3) |
 
-Current status: **Phase 1 — Blockout & primitives.** See [PLAN.md](PLAN.md)
-for the full roadmap and per-phase checklists.
+## Install
 
-## What works today (Phase 1)
+Needs Python 3.9 or newer.
 
-- Viewport with grid, studio lighting + matcap toggle; orbit / zoom / roll / pan
-- Primitives: sphere, cube, cylinder, capsule, torus, plane
-- **QuickShape-3D**: draw a stroke, hold still → it snaps to a clean
-  line/circle/ellipse/rectangle/polygon/curve → make it 3D via extrude, lathe,
-  inflate, or tube
-- Move/rotate/scale gizmos + free-drag; **hold still during any transform to
-  snap** to the grid / 15° angles
-- Live mirror symmetry (X/Y/Z, per object, baked on export)
-- Boolean union/subtract (manifold-3d WASM, in a worker, undoable)
-- Undo/redo everywhere (2-finger tap / 3-finger tap, ⌘Z / ⇧⌘Z)
-- Gallery with thumbnails; IndexedDB autosave on every change
-- Export STL (binary, mm, watertight-checked), OBJ (with UVs), GLB — via the
-  iPad share sheet, or download on desktop
-
-## Gestures & keys
-
-| Touch / Pencil | Mouse / keyboard | Action |
-| --- | --- | --- |
-| 1 finger / Pencil | LMB | Active tool (select · drag · draw) |
-| 2-finger drag | RMB or MMB drag | Orbit |
-| Pinch | Wheel | Zoom |
-| 2-finger twist | — | Roll |
-| 3-finger drag | Shift+wheel / Shift+drag | Pan |
-| 2-finger tap | ⌘Z | Undo |
-| 3-finger tap | ⇧⌘Z | Redo |
-| Draw + hold still | Draw + hold still | QuickShape snap |
-| Hold still mid-transform | Hold still mid-transform | Snap to grid / angles |
-
-Keys: `W/E/R` gizmo modes · `Tab` cycle tool · `[` `]` size · `S` symmetry ·
-`M` matcap · `F` frame · `⌘D` duplicate · `Delete` delete · `?` full overlay.
-
-In Move mode, dragging empty space orbits (tap empty space to deselect).
-
-## Deploy
-
-**GitHub Pages** (how the live app above is published):
-
-```sh
-npx vite build --base=/Drawing-Aide/   # or your repo name
-# push dist/ (+ a .nojekyll file) to the gh-pages branch
+```
+git clone https://github.com/mreindl118-boop/Drawing-Aide.git
+cd Drawing-Aide
+pip install -e .
 ```
 
-**Cloudflare Pages** (alternative):
+## Use
 
-```sh
-npm run deploy        # build + publish to Cloudflare Pages + print the URL
+```
+drawing-aide photo.jpg                                   # block impasto, 100 x 120 cm, 1-inch blocks
+drawing-aide photo.jpg --style cubist --size 3           # smaller planes
+drawing-aide photo.jpg --size 1.5 --ground white         # 1.5-inch blocks on white canvas
+drawing-aide photo.jpg --subject-only                    # leave a plain backdrop unpainted
+drawing-aide photo.jpg --canvas 60 80 --colors 16        # different canvas and palette size
+drawing-aide --list-styles
 ```
 
-One-time setup: `npx wrangler login` (or set `CLOUDFLARE_API_TOKEN` +
-`CLOUDFLARE_ACCOUNT_ID`). The script creates the Pages project on first run
-(`SCULPTPAD_PAGES_PROJECT` overrides the name). Cache policy ships in
-`public/_headers`: hashed assets immutable, `sw.js`/`index.html` no-cache.
+Results go to `./out` (change with `-o`). The canvas flips to landscape for landscape photos unless you
+pass `--fixed-orientation`.
 
-**Updates:** the service worker registers in `prompt` mode — the app never
-hard-reloads mid-edit. Update checks run at launch, whenever the (suspended)
-iPad PWA returns to the foreground, and every 30 minutes; a waiting version
-shows a "New version ready — Restart" toast (deferred while a stroke,
-transform, or export is in flight) that flushes autosave before reloading.
-Current version + build date live in Settings (gear icon) with a manual
-check button. The whole loop is regression-tested by `npm run smoke:update`.
+### What you get
 
-## Development
+For every photo:
+- `<name>_<style>.jpg`: the painting.
 
-```sh
-npm install
-npm run dev        # local dev server
-npm run build      # typecheck + production build + PWA/service worker
-npm run preview    # serve the build
-npm run smoke      # headless end-to-end smoke test (build first)
-npm run icons      # regenerate public/icons/*.png
+For `blocks`, minimalist and cubist, also:
+- `<name>_<style>_palette.json`: palette colours (numbered dark to light) and how much each is used.
+
+For `blocks`, also:
+- `<name>_blocks_paint_by_number.png`: numbered grid with row and column labels, and a colour legend
+  with block counts.
+- `<name>_blocks_grid.csv`: the palette number of every block, row by row.
+
+### Hands-off folder mode
+
+```
+drawing-aide --folder "~/Google Drive/Paint Inbox" -o "~/Google Drive/Paintings" --watch
 ```
 
-### Testing on an iPad (LAN dev flow)
+Converts every new or changed photo in the folder and keeps watching. Without `--watch` it runs once,
+which suits a scheduled task (cron, Windows Task Scheduler). Converted files are tracked in
+`manifest.json` in the output folder, so nothing is painted twice. Put a `drawing-aide.json` in the input
+folder to change that folder's settings, for example:
 
-1. Put the iPad and your dev machine on the same network.
-2. `npm run dev:lan` and open the printed `http://<your-ip>:5173` on the iPad.
-3. **PWA install / service worker / Web Share need HTTPS** off-localhost:
-   use `npm run dev:lan-https` (self-signed via `@vitejs/plugin-basic-ssl`;
-   accept the certificate warning on the iPad), or test install against
-   `npm run build && npm run preview -- --host` behind a real cert.
-4. Apple Pencil pressure/tilt and multi-touch gestures are **only testable
-   on-device** — desktop emulation does not deliver real `pointermove`
-   pressure or multi-finger gestures.
-5. Add to Home Screen from Safari's share menu to verify standalone mode,
-   then airplane-mode the iPad to verify offline boot + autosave.
+```json
+{"style": "blocks", "size": 1.5, "ground": "white", "canvas_cm": [80, 100]}
+```
 
-### Architecture notes
+### From Python
 
-- `src/core/` — document model, undo history, geometry data (immutable typed
-  arrays), IndexedDB store. No three.js imports except `geo.ts` conversions.
-- `src/editor/` — viewport (render-on-demand rAF loop, isolated from UI),
-  trackball camera rig, unified Pointer Events gesture layer, gizmo with
-  hold-to-snap, QuickShape capture + fitting, boolean client, exporters,
-  plain-DOM chrome.
-- `src/workers/manifold.worker.ts` — manifold-3d WASM: booleans + watertight
-  checks off the main thread.
-- Everything heavy stays out of the render loop; meshes are BVH-indexed
-  (three-mesh-bvh) ready for sculpt raycasts in Phase 2.
+```python
+from drawing_aide import render, convert, Settings
+from PIL import Image
+
+res = render(Image.open("photo.jpg"), Settings(style="cubist", size=3))
+res.image.save("cubist.jpg")
+
+convert("photo.jpg", "out", style="blocks", size=1.0)   # writes all the files above
+```
+
+## Browser version
+
+`web/studio.html` is the same idea as a single page: style picker, size slider, drop or paste a photo,
+and a paint-by-number view. Open it in any browser; nothing is uploaded.
+
+## Adding a style
+
+Add a module to `src/drawing_aide/styles/` with `NAME`, `BLURB`, `SIZE` (label, min, max, default) and
+`render(img, settings) -> Result`, then register it in `styles/__init__.py`. It shows up in the CLI and
+in `--list-styles` automatically.
+
+## Tests
+
+```
+pip install -e ".[test]"
+pytest
+```
+
+The sample portrait in `examples/` is a public-domain NASA photo of astronaut Eileen Collins.
+Licensed MIT.

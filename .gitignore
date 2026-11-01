@@ -1,6 +1,11 @@
-node_modules/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
 dist/
-dev-dist/
-*.local
+out/
+.pytest_cache/
+models/*.onnx
 .DS_Store
-dist-demo/
