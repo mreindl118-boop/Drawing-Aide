@@ -14,7 +14,7 @@ painting. For the block style it also gives you a paint-by-number sheet so you c
 
 ## Install
 
-Needs Python 3.9 or newer.
+Needs Python 3.10 or newer.
 
 ```
 git clone https://github.com/mreindl118-boop/Drawing-Aide.git
