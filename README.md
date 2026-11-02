@@ -85,8 +85,16 @@ the gallery, and updates itself whenever a new release is published. See
 
 ## Browser version
 
-`web/studio.html` is the same idea as a single page: style picker, size slider, drop or paste a photo,
-and a paint-by-number view. Open it in any browser; nothing is uploaded.
+`web/studio.html` is the Style Studio as a single page (the Android app wraps the same file). Open it in
+any browser; nothing is uploaded. The painting sits on top with every control docked right under it
+(beside it on wide screens). Rendering runs in a Web Worker, so dragging the slider or switching styles
+never freezes the page, and a newer request cancels the older one.
+
+Studio styles: Block impasto (with paint-by-number), Van Gogh, Geometric (minimal flat colours cut by
+lines and circles), Impressionist, Cartoon, Retro anime, Vintage poster, Storybook pencil, Ink sketch,
+Watercolour, Pop art, Cubist, Stained glass, Low poly, Minimalist and Pointillist. The canvas size can be
+ratio locked (match photo, 5:6, 4:5, 3:4, 2:3, 1:1, 16:9) or free. The Python package currently covers
+the first four classic styles (blocks, minimal, cubist, pointillist).
 
 ## Adding a style
 
