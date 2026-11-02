@@ -293,38 +293,6 @@ function renderMinimal(img,cfg){const r=rng(11);const[W,H,Wcm,Hcm]=outSize(img,c
   paperTexture(d,W,H,r,0.25);
   return{data:out,pal,counts:pal.map((_,i)=>lab.reduce((s,v)=>s+(v===i),0)),countUnit:"px",info:{Canvas:`${Wcm} × ${Hcm} cm`,Fields:k}}}
 
-function renderCubist(img,cfg){const r=rng(5);const[W,H,Wcm,Hcm]=outSize(img,cfg);const src=cropCanvas(img,W/H);
-  const px=sampleImage(src,W,H);const S=Math.max(W,H)/(10+(10-cfg.size)*3);
-  // detail map (edge strength) to place short local cuts where the photo has structure
-  const dw=48,dh=Math.round(48*H/W),sm=sampleImage(src,dw,dh),det=[];let dsum=0;
-  for(let y=1;y<dh-1;y++)for(let x=1;x<dw-1;x++){const o=(y*dw+x)*4,l=k=>sm[k]+sm[k+1]+sm[k+2];
-    const g=Math.abs(l(o+4)-l(o-4))+Math.abs(l(o+dw*4)-l(o-dw*4));det.push([x,y,g]);dsum+=g}
-  const pick=()=>{let t=r()*dsum;for(const d of det){t-=d[2];if(t<=0)return d}return det[det.length-1]};
-  // straight cuts: a few spanning the canvas, many local ones (limited to a disc)
-  const lines=[];const G=Math.round(14+(10-cfg.size)*3.5),Lc=Math.round(8+(10-cfg.size)*4);
-  for(let i=0;i<G;i++){const ang=r()*Math.PI,cx=r()*W,cy=r()*H;lines.push([Math.cos(ang),Math.sin(ang),cx,cy,1e9])}
-  for(let i=0;i<Lc;i++){const d=pick();const cx=(d[0]+r())*W/dw,cy=(d[1]+r())*H/dh;
-    const ang=r()<0.6?(r()<0.5?0:Math.PI/2)+(r()-0.5)*0.5:r()*Math.PI;lines.push([Math.cos(ang),Math.sin(ang),cx,cy,S*(1.2+r()*2)])}
-  const M=lines.length,own=new Int32Array(W*H),ids=new Map();let n=0;
-  for(let y=0;y<H;y++)for(let x=0;x<W;x++){let h1=0,h2=0,h3=0;
-    for(let k=0;k<M;k++){const L=lines[k];const dx=x-L[2],dy=y-L[3],al=dx*L[0]+dy*L[1],pp=-dx*L[1]+dy*L[0];if(L[4]<1e8&&(Math.abs(al)>L[4]||Math.abs(pp)>L[4]*1.6))continue;
-      if(pp>0){if(k<31)h1|=1<<k;else if(k<62)h2|=1<<(k-31);else h3|=1<<(k-62)}}
-    const key=h1+":"+h2+":"+h3;let id=ids.get(key);if(id===undefined){id=n++;ids.set(key,id)}own[y*W+x]=id}
-  const sum=new Float64Array(n*3),cnt=new Float64Array(n),cxs=new Float64Array(n),cys=new Float64Array(n),off=[];
-  for(let s=0;s<n;s++)off.push([(r()-0.5)*S*0.25,(r()-0.5)*S*0.25,r()*6.283,0.5+r()*0.9]);
-  for(let y=0;y<H;y+=2)for(let x=0;x<W;x+=2){const s=own[y*W+x];const xx=Math.min(W-1,Math.max(0,Math.round(x+off[s][0]))),yy=Math.min(H-1,Math.max(0,Math.round(y+off[s][1])));
-    const o=(yy*W+xx)*4;sum[s*3]+=px[o];sum[s*3+1]+=px[o+1];sum[s*3+2]+=px[o+2];cnt[s]++;cxs[s]+=x;cys[s]+=y}
-  const labs=[],keep=[];for(let s=0;s<n;s++)if(cnt[s]){labs.push(rgb2lab(sum[s*3]/cnt[s],sum[s*3+1]/cnt[s],sum[s*3+2]/cnt[s]));keep.push(s);cxs[s]/=cnt[s];cys[s]/=cnt[s]}
-  const{C,lb}=paletteFrom(labs,Math.min(cfg.ncol,12),r,0.5,7);const fc=new Int32Array(n).fill(0);keep.forEach((s,i)=>fc[s]=lb[i]);
-  const pal=C.map(c=>lab2rgb(...c));const rad=S*0.5;
-  const out=new ImageData(W,H),d=out.data,lw=Math.max(1,Math.round(W/700));
-  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x,s=own[i],ang=off[s][2],amt=off[s][3];const c=C[fc[s]];
-    const t=((x-cxs[s])*Math.cos(ang)+(y-cys[s])*Math.sin(ang))/rad;const L=c[0]+Math.max(-1,Math.min(1,t))*15*amt;
-    let[R,G,B]=lab2rgb(L,c[1],c[2]);let line=1;
-    for(let k=1;k<=lw;k++){if((x+k<W&&own[i+k]!==s)||(y+k<H&&own[i+k*W]!==s)){line=k===lw&&lw>1?0.5:0.22;break}}
-    const v=(r()-0.5)*7;d[i*4]=R*line+v;d[i*4+1]=G*line+v;d[i*4+2]=B*line+v;d[i*4+3]=255}
-  paperTexture(d,W,H,r,0.45);
-  return{data:out,pal,counts:pal.map((_,i)=>keep.reduce((s,j)=>s+(fc[j]===i),0)),countUnit:"planes",info:{Canvas:`${Wcm} × ${Hcm} cm`,Planes:keep.length}}}
 
 function renderPointillist(img,cfg){const r=rng(3);const[W,H,Wcm,Hcm]=outSize(img,cfg);const src=cropCanvas(img,W/H);const px=sampleImage(src,W,H);
   const c=new OffscreenCanvas(1,1);c.width=W;c.height=H;const g=c.getContext("2d",{willReadFrequently:true});
@@ -453,7 +421,11 @@ function renderLowPoly(img,cfg){const r=rng(29);const[W,H,Wcm,Hcm]=outSize(img,c
 
 /* ---------------- requested styles ---------------- */
 // shared: flat colour regions (k-means at low res, smoothed at full res) for cartoon-like looks
-function celRegions(src,W,H,k,size,r,desat,warm){
+// colour regions are found at half size (much faster on phones) and scaled back up
+function celRegions(src,W,H,k,size,r,desat,warm){if(W*H<250000)return celRegionsAt(src,W,H,k,size,r,desat,warm);
+  const w2=Math.ceil(W/2),h2=Math.ceil(H/2),res=celRegionsAt(src,w2,h2,k,size,r,desat,warm),lab=new Int32Array(W*H);
+  for(let y=0;y<H;y++){const o=(y>>1)*w2;for(let x=0;x<W;x++)lab[y*W+x]=res.lab[o+(x>>1)]}return{C:res.C,lab}}
+function celRegionsAt(src,W,H,k,size,r,desat,warm){
   const sw=Math.max(40,Math.round(260-size*20)),sh=Math.round(sw*H/W),sp=sampleImage(src,sw,sh),labs=[];
   for(let i=0;i<sw*sh;i++)labs.push(rgb2lab(sp[i*4],sp[i*4+1],sp[i*4+2]));
   const{C,lb}=paletteFrom(labs,k,r,desat,warm);
@@ -549,31 +521,85 @@ function renderVanGogh(img,cfg){const r=rng(47);const[W,H,Wcm,Hcm]=outSize(img,c
       const hl=lab2rgb(Math.min(98,Lc+14),C*0.8*Math.cos(h),C*0.8*Math.sin(h));g.strokeStyle=`rgba(${hl[0]|0},${hl[1]|0},${hl[2]|0},0.35)`;g.lineWidth=w*0.25;g.stroke()}}
   return{data:g.getImageData(0,0,W,H),pal:null,info:{Canvas:`${Wcm} × ${Hcm} cm`}}}
 
-function renderGeometric(img,cfg){const r=rng(53);const[W,H,Wcm,Hcm]=outSize(img,cfg);const src=cropCanvas(img,W/H);const px=sampleImage(src,W,H);
-  // simple shapes: a few straight cuts and circles split the canvas; each piece takes one flat colour
-  const dw=32,dh=Math.max(4,Math.round(32*H/W)),sm=sampleImage(src,dw,dh),det=[];let ds=0;
-  for(let y=1;y<dh-1;y++)for(let x=1;x<dw-1;x++){const o=(y*dw+x)*4,l=k=>sm[k]+sm[k+1]+sm[k+2];const gd=Math.abs(l(o+4)-l(o-4))+Math.abs(l(o+dw*4)-l(o-dw*4));det.push([x,y,gd]);ds+=gd}
-  const pick=()=>{let t=r()*ds;for(const q of det){t-=q[2];if(t<=0)return q}return det[det.length-1]};
-  const shapes=[],nl=Math.round(4+(10-cfg.size)*1.2),nc=Math.round(2+(10-cfg.size)*0.5),U=Math.max(W,H);
-  for(let i=0;i<nl;i++){const q=pick(),cx=(q[0]+0.5)*W/dw,cy=(q[1]+0.5)*H/dh;const ang=r()<0.7?Math.round(r()*4)*Math.PI/4+(r()-0.5)*0.15:r()*Math.PI;shapes.push({t:"l",c:Math.cos(ang),s:Math.sin(ang),cx,cy})}
-  for(let i=0;i<nc;i++){const q=pick();shapes.push({t:"c",cx:(q[0]+0.5)*W/dw,cy:(q[1]+0.5)*H/dh,rad:U*(0.06+r()*0.16)})}
-  // a coarse value/colour map keeps the subject readable; the shapes then cut it into flat facets
-  const cel0=celRegions(src,W,H,7,Math.min(10,6+cfg.size*0.35),r,1,0).lab;
-const cel=cel0;
-  const own=new Int32Array(W*H),ids=new Map();let n=0;
-  for(let y=0;y<H;y++)for(let x=0;x<W;x++){let key=cel[y*W+x];for(let k=0;k<shapes.length;k++){const s=shapes[k];let b;
-      if(s.t==="l")b=(-(x-s.cx)*s.s+(y-s.cy)*s.c)>0;else b=(x-s.cx)**2+(y-s.cy)**2<s.rad*s.rad;if(b)key+=8*2**k}
-    let id=ids.get(key);if(id===undefined){id=n++;ids.set(key,id)}own[y*W+x]=id}
-  const sum=new Float64Array(n*3),cnt=new Float64Array(n);for(let i=0;i<W*H;i+=2){const s=own[i];sum[s*3]+=px[i*4];sum[s*3+1]+=px[i*4+1];sum[s*3+2]+=px[i*4+2];cnt[s]++}
-  const labs=[],keep=[];for(let s=0;s<n;s++)if(cnt[s]){labs.push(rgb2lab(sum[s*3]/cnt[s],sum[s*3+1]/cnt[s],sum[s*3+2]/cnt[s]));keep.push(s)}
-  const{C,lb}=paletteFrom(labs,Math.min(8,keep.length),r,1,0);const fc=new Int32Array(n);keep.forEach((s,i)=>fc[s]=lb[i]);
-  const pal=C.map(([L,a,b])=>lab2rgb(Math.min(94,L*0.9+10),a*1.35,b*1.35));
-  const out=new ImageData(W,H),d=out.data,lw=Math.max(1,Math.round(W/450)),ink=[26,26,30];
-  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x,s=own[i];let p=pal[fc[s]],line=false;
-    for(let k=1;k<=lw&&!line;k++){if((x+k<W&&own[i+k]!==s)||(y+k<H&&own[i+k*W]!==s))line=true}
-    if(line)p=ink;d[i*4]=p[0];d[i*4+1]=p[1];d[i*4+2]=p[2];d[i*4+3]=255}
-  paperTexture(d,W,H,r,0.3);
-  return{data:out,pal,counts:pal.map((_,i)=>keep.reduce((s,j)=>s+(fc[j]===i),0)),countUnit:"shapes",info:{Canvas:`${Wcm} × ${Hcm} cm`,Shapes:keep.length}}}
+
+/* ---------- shared: split the picture into flat facets with straight cuts (and a few circles) ----------
+   Works like a painter blocking in: always cut the piece that is least like one flat colour,
+   along whichever of a handful of candidate lines/circles separates its colours best.
+   Runs on a small copy of the photo, then the cut tree is drawn at full size. */
+function facetTree(src,W,H,leaves,r,opt){
+  const sw=Math.max(40,Math.round(Math.min(170,Math.sqrt(leaves)*16))),sh=Math.max(8,Math.round(sw*H/W)),sp=sampleImage(src,sw,sh),N=sw*sh;
+  const LL=new Float32Array(N),AA=new Float32Array(N),BB=new Float32Array(N),X=new Float32Array(N),Y=new Float32Array(N);
+  for(let i=0;i<N;i++){const[l,a,b]=rgb2lab(sp[i*4],sp[i*4+1],sp[i*4+2]);LL[i]=l;AA[i]=a*opt.chromaW;BB[i]=b*opt.chromaW;X[i]=((i%sw)+0.5)/sw;Y[i]=(((i/sw)|0)+0.5)/sh}
+  const asp=W/H,minPix=Math.max(4,N/leaves*opt.minFrac);
+  // detail weight: busy areas (faces, hands, edges) count more, so cuts gather there
+  const G=new Float32Array(N);for(let y=1;y<sh-1;y++)for(let x=1;x<sw-1;x++){const i=y*sw+x;G[i]=Math.hypot(LL[i+1]-LL[i-1],LL[i+sw]-LL[i-sw])}
+  const Gb=boxBlur(G,sw,sh,Math.max(2,sw/40),2);let gm=0;for(let i=0;i<N;i++)gm+=Gb[i];gm=gm/N+1e-6;
+  const Wt=new Float32Array(N);for(let i=0;i<N;i++)Wt[i]=1+opt.detail*Math.min(4,Gb[i]/gm);
+  const sse=idx=>{let n=0,sl=0,sa=0,sb=0,ql=0,qa=0,qb=0;for(const i of idx){const w=Wt[i];n+=w;sl+=w*LL[i];sa+=w*AA[i];sb+=w*BB[i];ql+=w*LL[i]*LL[i];qa+=w*AA[i]*AA[i];qb+=w*BB[i]*BB[i]}
+    return n?ql-sl*sl/n+qa-sa*sa/n+qb-sb*sb/n:0};
+  const side=(nd,i)=>nd.t==="c"?((X[i]-nd.cx)*asp)**2+(Y[i]-nd.cy)**2<nd.r*nd.r:X[i]*nd.nx+Y[i]*nd.ny>nd.c;
+  function bestSplit(idx){if(idx.length<minPix*2)return null;const base=sse(idx);let best=null;
+    for(let t=0;t<opt.tries;t++){const p=idx[(r()*idx.length)|0];let nd;
+      if(r()<opt.circleP){const q=idx[(r()*idx.length)|0];nd={t:"c",cx:X[p],cy:Y[p],r:Math.max(0.03,Math.hypot((X[q]-X[p])*asp,Y[q]-Y[p]))}}
+      else{const ang=opt.angles?opt.angles[(r()*opt.angles.length)|0]+(r()-0.5)*opt.jitter:r()*Math.PI;const nx=Math.cos(ang),ny=Math.sin(ang);nd={t:"l",nx,ny,c:X[p]*nx+Y[p]*ny}}
+      const a=[],b=[];for(const i of idx)(side(nd,i)?a:b).push(i);if(a.length<minPix||b.length<minPix)continue;
+      const g=base-sse(a)-sse(b);if(!best||g>best.g)best={g,nd,a,b}}
+    return best}
+  const nodes=[],open=[];const leaf=idx=>{const id=nodes.length;nodes.push({leaf:true,idx});open.push(id);return id};
+  leaf(Array.from({length:N},(_,i)=>i));const cache=new Map();let count=1;
+  while(count<leaves){let bi=-1,bg=-1;for(let k=0;k<open.length;k++){const id=open[k];if(!cache.has(id))cache.set(id,bestSplit(nodes[id].idx));const s=cache.get(id);if(s&&s.g>bg){bg=s.g;bi=k}}
+    if(bi<0)break;const id=open[bi],s=cache.get(id);open.splice(bi,1);cache.delete(id);
+    const A=leaf(s.a),B=leaf(s.b);nodes[id]={leaf:false,nd:s.nd,A,B};count++}
+  // leaf ids and per-leaf mean colour (from the small copy)
+  const leafOf=new Map();let nl=0;for(let i=0;i<nodes.length;i++)if(nodes[i].leaf)leafOf.set(i,nl++);
+  const mean=[];for(let i=0;i<nodes.length;i++)if(nodes[i].leaf){let sl=0,sa=0,sb=0;const idx=nodes[i].idx;for(const j of idx){sl+=LL[j];sa+=AA[j];sb+=BB[j]}const n=Math.max(1,idx.length);mean[leafOf.get(i)]=[sl/n,sa/n/opt.chromaW,sb/n/opt.chromaW,idx.length]}
+  // full-size lookup
+  const own=new Int32Array(W*H);
+  for(let y=0;y<H;y++){const fy=(y+0.5)/H;for(let x=0;x<W;x++){const fx=(x+0.5)/W;let id=0,nd;
+    while(!(nd=nodes[id]).leaf){const q=nd.nd;const inA=q.t==="c"?((fx-q.cx)*asp)**2+(fy-q.cy)**2<q.r*q.r:fx*q.nx+fy*q.ny>q.c;id=inA?nd.A:nd.B}
+    own[y*W+x]=leafOf.get(id)}}
+  return{own,mean,n:nl}}
+function facetEdges(own,W,H,lw){const e=new Float32Array(W*H);for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x,s=own[i];
+  if((x+1<W&&own[i+1]!==s)||(y+1<H&&own[i+W]!==s))e[i]=1}
+  if(lw<=1)return e;const b=boxBlur(e,W,H,lw/2,1);for(let i=0;i<e.length;i++)b[i]=ss(0.1,0.3,b[i]);return b}
+
+/* Geometric: minimal flat colour shapes (straight cuts and a few circles), bold limited palette, clean ink lines. */
+function renderGeometric(img,cfg){const r=rng(53);const[W,H,Wcm,Hcm]=outSize(img,cfg);const src=cropCanvas(img,W/H);
+  const leaves=Math.round(14+(10-cfg.size)**1.6*4.5);
+  const{own,mean,n}=facetTree(src,W,H,leaves,r,{tries:28,circleP:0.12,angles:[0,Math.PI/4,Math.PI/2,3*Math.PI/4],jitter:0.12,chromaW:1.3,minFrac:0.12,detail:1.5});
+  const k=Math.max(4,Math.min(8,Math.round(cfg.ncol/4)));const{C,lb}=paletteFrom(mean.map(m=>[m[0],m[1],m[2]]),Math.min(k,n),r,1,0);
+  // flat, poster-like colours: push chroma up and spread the values apart
+  const pal=C.map(([L,a,b])=>lab2rgb(Math.max(14,Math.min(95,(L-50)*1.15+52)),a*1.5,b*1.5));
+  const lw=Math.max(1.5,W/320),E=facetEdges(own,W,H,lw),ink=[30,30,34];
+  const out=new ImageData(W,H),d=out.data;
+  for(let i=0;i<W*H;i++){const p=pal[lb[own[i]]],e=E[i];d[i*4]=p[0]+(ink[0]-p[0])*e;d[i*4+1]=p[1]+(ink[1]-p[1])*e;d[i*4+2]=p[2]+(ink[2]-p[2])*e;d[i*4+3]=255}
+  paperTexture(d,W,H,r,0.25);
+  return{data:out,pal,counts:pal.map((_,q)=>lb.reduce((s,v)=>s+(v===q),0)),countUnit:"shapes",info:{Canvas:`${Wcm} × ${Hcm} cm`,Shapes:n}}}
+
+/* Cubist (analytic): the subject broken into angular planes, each shaded light-to-dark across its face,
+   in an earthy ochre / umber / slate palette, with charcoal contour lines that come and go. */
+const CUBIST_PAL=[[44,40,38],[86,70,56],[124,92,62],[164,120,72],[198,160,98],[222,204,164],[96,104,106],[128,132,118],[152,112,92],[70,82,92]];
+function renderCubist(img,cfg){const r=rng(5);const[W,H,Wcm,Hcm]=outSize(img,cfg);const src=cropCanvas(img,W/H);
+  const leaves=Math.round(70+(10-cfg.size)**1.5*12);
+  const{own,mean,n}=facetTree(src,W,H,leaves,r,{tries:22,circleP:0.04,angles:null,jitter:0,chromaW:0.7,minFrac:0.06,detail:2.5});
+  const PL=CUBIST_PAL.map(c=>rgb2lab(c[0],c[1],c[2]));
+  // each plane: nearest earthy colour by value first, hue second; a random light direction; how strongly it is shaded
+  const fac=mean.map(([L,a,b])=>{let bi=0,bd=1e9;for(let q=0;q<PL.length;q++){const p=PL[q];const dd=(p[0]-L)**2*1+((p[1]-a*0.6)**2+(p[2]-b*0.6)**2)*0.35;if(dd<bd){bd=dd;bi=q}}
+    const ang=r()*Math.PI*2;const bp=PL[bi];return{base:[bp[0],bp[1]*0.5+a*0.6,bp[2]*0.5+b*0.6],L,dx:Math.cos(ang),dy:Math.sin(ang),amp:5+r()*8}});
+  // plane extents along their shading direction
+  const lo=new Float32Array(n).fill(1e9),hi=new Float32Array(n).fill(-1e9);
+  for(let y=0;y<H;y+=2)for(let x=0;x<W;x+=2){const f=fac[own[y*W+x]],s=own[y*W+x],p=x*f.dx+y*f.dy;if(p<lo[s])lo[s]=p;if(p>hi[s])hi[s]=p}
+  const lw=Math.max(1.5,W/380),E=facetEdges(own,W,H,lw);
+  // contour lines fade in and out along their length, like charcoal
+  const flick=lowNoise(W,H,Math.max(8,W/25),r),grain=lowNoise(W,H,2.5,r);
+  const out=new ImageData(W,H),d=out.data;const pal=fac.map(f=>lab2rgb(f.base[0],f.base[1],f.base[2]));
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x,s=own[i],f=fac[s];const t=hi[s]>lo[s]?((x*f.dx+y*f.dy)-lo[s])/(hi[s]-lo[s]):0.5;
+    const Lv=f.base[0]*0.2+f.L*0.8+(t-0.5)*f.amp*2+grain[i]*3;
+    let[R,G,B]=lab2rgb(Math.max(8,Math.min(96,Lv)),f.base[1],f.base[2]);
+    const e=E[i]*ss(-0.4,0.2,flick[i])*0.9;R+=(34-R)*e;G+=(30-G)*e;B+=(28-B)*e;
+    d[i*4]=R;d[i*4+1]=G;d[i*4+2]=B;d[i*4+3]=255}
+  paperTexture(d,W,H,r,0.45);
+  return{data:out,pal:null,info:{Canvas:`${Wcm} × ${Hcm} cm`,Planes:n}}}
 
 const RENDER={blocks:renderBlocks,impressionist:renderImpressionist,vangogh:renderVanGogh,watercolor:renderWatercolor,ink:renderInk,pencil:renderPencil,
   cartoon:renderCartoon,anime:renderAnime,poster:renderPoster,pop:renderPop,geometric:renderGeometric,cubist:renderCubist,glass:renderGlass,lowpoly:renderLowPoly,
@@ -692,8 +718,9 @@ function show(res,style){const c=toCanvas(res);state.lastCanvas=c;
 
 // thumbnails of every style from the current photo, one at a time in their own worker
 let thumbGen=0;
-async function thumbs(){const gen=++thumbGen;for(const[k]of STYLES){if(gen!==thumbGen)return;if(crashed.has(k))continue;
-  try{const cfg={...cfgFor(k,180),cw:100,ch:100,size:k==="blocks"?2.5:Math.min(10,META[k].size.def+2),pbn:false,subjectOnly:false};
+const idle=()=>new Promise(res=>{const chk=()=>preview.pending||$("view").classList.contains("busy")?setTimeout(chk,200):res();chk()});
+async function thumbs(){const gen=++thumbGen;for(const[k]of STYLES){await idle();if(gen!==thumbGen)return;if(crashed.has(k))continue;
+  try{const cfg={...cfgFor(k,150),cw:100,ch:100,size:k==="blocks"?2.5:Math.min(10,META[k].size.def+2),pbn:false,subjectOnly:false};
     const res=await thumbR.run(k,cfg,state.thumb);if(gen!==thumbGen)return;const c=toCanvas(res);
     const tc=stylesEl.querySelector(`[data-k="${k}"] canvas`).getContext("2d");tc.drawImage(c,0,0,168,168)}catch(e){if(e&&e.cancelled)return}}}
 
