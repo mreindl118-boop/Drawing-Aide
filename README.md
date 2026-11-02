@@ -76,6 +76,13 @@ res.image.save("cubist.jpg")
 convert("photo.jpg", "out", style="blocks", size=1.0)   # writes all the files above
 ```
 
+## Android app
+
+Install the latest APK from [Releases](https://github.com/mreindl118-boop/Drawing-Aide/releases/latest).
+The app runs the Style Studio, saves paintings to `Pictures/Drawing Aide`, accepts photos shared from
+the gallery, and updates itself whenever a new release is published. See
+[android/README.md](android/README.md) for how releases are built and signed.
+
 ## Browser version
 
 `web/studio.html` is the same idea as a single page: style picker, size slider, drop or paste a photo,
