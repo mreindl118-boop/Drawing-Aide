@@ -172,11 +172,11 @@ function boxBlur(a,w,h,r,passes=3){r=Math.max(1,Math.round(r));let s=a,t=new Flo
     s=u}
   return s}
 const ss=(e0,e1,x)=>{let t=(x-e0)/(e1-e0);t=t<0?0:t>1?1:t;return t*t*(3-2*t)};
-function sampleImage(img,w,h){const c=new OffscreenCanvas(1,1);c.width=w;c.height=h;const g=c.getContext("2d");g.imageSmoothingQuality="high";g.drawImage(img,0,0,w,h);return g.getImageData(0,0,w,h).data}
+function sampleImage(img,w,h){const c=new OffscreenCanvas(1,1);c.width=w;c.height=h;const g=c.getContext("2d",{willReadFrequently:true});g.imageSmoothingQuality="high";g.drawImage(img,0,0,w,h);return g.getImageData(0,0,w,h).data}
 function cropCanvas(img,aspect){const w=img.width,h=img.height;let sx=0,sy=0,sw=w,sh=h;
   if(w/h>aspect){sw=h*aspect;sx=(w-sw)/2}else{sh=w/aspect;sy=(h-sh)/2}
   const c=new OffscreenCanvas(1,1);const sc=Math.min(1,1400/Math.max(sw,sh));c.width=Math.round(sw*sc);c.height=Math.round(sh*sc);
-  c.getContext("2d").drawImage(img,sx,sy,sw,sh,0,0,c.width,c.height);return c}
+  c.getContext("2d",{willReadFrequently:true}).drawImage(img,sx,sy,sw,sh,0,0,c.width,c.height);return c}
 function hexToRgb(h){const n=parseInt(h.slice(1),16);return[n>>16&255,n>>8&255,n&255]}
 function paletteFrom(labs,k,r,desat=0.9,warm=1.5){const X=labs.map(l=>painterly(l,desat,warm));const{C,lb}=kmeans(X,k,r);
   const ord=C.map((c,i)=>i).sort((a,b)=>C[a][0]-C[b][0]);const re=new Int32Array(C.length);ord.forEach((o,i)=>re[o]=i);
@@ -260,7 +260,7 @@ function renderBlocks(img,cfg){
 
 function drawPBN(idx,pal,cols,rows,Wcm,Hcm){
   const cs=Math.max(18,Math.min(34,Math.floor(1400/cols))),m=30,W=m+cols*cs+6,H=m+rows*cs+6;
-  const c=new OffscreenCanvas(1,1);c.width=W;c.height=H;const g=c.getContext("2d");g.fillStyle="#fff";g.fillRect(0,0,W,H);
+  const c=new OffscreenCanvas(1,1);c.width=W;c.height=H;const g=c.getContext("2d",{willReadFrequently:true});g.fillStyle="#fff";g.fillRect(0,0,W,H);
   g.textAlign="center";g.textBaseline="middle";
   for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){const i=idx[y*cols+x],X=m+x*cs,Y=m+y*cs;
     if(i<0){g.strokeStyle="#ccc";g.strokeRect(X+.5,Y+.5,cs,cs);continue}
@@ -327,7 +327,7 @@ function renderCubist(img,cfg){const r=rng(5);const[W,H,Wcm,Hcm]=outSize(img,cfg
   return{data:out,pal,counts:pal.map((_,i)=>keep.reduce((s,j)=>s+(fc[j]===i),0)),countUnit:"planes",info:{Canvas:`${Wcm} × ${Hcm} cm`,Planes:keep.length}}}
 
 function renderPointillist(img,cfg){const r=rng(3);const[W,H,Wcm,Hcm]=outSize(img,cfg);const src=cropCanvas(img,W/H);const px=sampleImage(src,W,H);
-  const c=new OffscreenCanvas(1,1);c.width=W;c.height=H;const g=c.getContext("2d");
+  const c=new OffscreenCanvas(1,1);c.width=W;c.height=H;const g=c.getContext("2d",{willReadFrequently:true});
   const gr=hexToRgb(cfg.ground);g.fillStyle=hex(gr);g.fillRect(0,0,W,H);
   const rad=1.6+cfg.size*1.15,n=Math.round(W*H/(rad*rad)*1.4);
   for(let k=0;k<n;k++){const x=r()*W,y=r()*H,o=((y|0)*W+(x|0))*4;let[L,a,b]=rgb2lab(px[o],px[o+1],px[o+2]);
@@ -344,11 +344,13 @@ function lumOf(px,n){const L=new Float32Array(n);for(let i=0;i<n;i++)L[i]=(0.299
 function lowNoise(W,H,cell,r){const gw=Math.ceil(W/cell)+2,gh=Math.ceil(H/cell)+2,g=new Float32Array(gw*gh);for(let i=0;i<g.length;i++)g[i]=r()*2-1;
   const o=new Float32Array(W*H);for(let y=0;y<H;y++){const fy=y/cell,j=fy|0,ty=fy-j;for(let x=0;x<W;x++){const fx=x/cell,i=fx|0,tx=fx-i;
     const a=g[j*gw+i],b=g[j*gw+i+1],c=g[(j+1)*gw+i],d=g[(j+1)*gw+i+1];o[y*W+x]=(a*(1-tx)+b*tx)*(1-ty)+(c*(1-tx)+d*tx)*ty}}return o}
-function canvasOf(W,H){const c=new OffscreenCanvas(W,H);return[c,c.getContext("2d")]}
+function soften(src,W,H,rad){const k=Math.max(1,rad*2),sw=Math.max(2,Math.round(W/k)),sh=Math.max(2,Math.round(H/k));
+  const t=new OffscreenCanvas(sw,sh),tg=t.getContext("2d",{willReadFrequently:true});tg.imageSmoothingQuality="high";tg.drawImage(src,0,0,sw,sh);return t}
+function canvasOf(W,H){const c=new OffscreenCanvas(W,H);return[c,c.getContext("2d",{willReadFrequently:true})]}
 
 function renderImpressionist(img,cfg){const r=rng(9);const[W,H,Wcm,Hcm]=outSize(img,cfg);const src=cropCanvas(img,W/H);
   const px=sampleImage(src,W,H),L=boxBlur(lumOf(px,W*H),W,H,2,2);const[c,g]=canvasOf(W,H);
-  g.fillStyle="#e9e1d2";g.fillRect(0,0,W,H);g.filter="blur("+Math.round(W/120)+"px)";g.globalAlpha=0.9;g.drawImage(src,0,0,W,H);g.filter="none";g.globalAlpha=1;
+  g.fillStyle="#e9e1d2";g.fillRect(0,0,W,H);g.globalAlpha=0.9;g.imageSmoothingQuality="high";g.drawImage(soften(src,W,H,Math.round(W/120)),0,0,W,H);g.globalAlpha=1;
   const base=(1.6+cfg.size*1.25)*W/1000;g.lineCap="round";
   const passes=[[3,1.0,0],[1.8,1.0,0],[1,1.1,0.035]];
   for(const[mul,dens,minGrad]of passes){const len=base*mul*3,w=base*mul;const n=Math.round(W*H/(len*w)*dens);
@@ -534,7 +536,7 @@ function renderVanGogh(img,cfg){const r=rng(47);const[W,H,Wcm,Hcm]=outSize(img,c
     const cx=(psi[i+W]-psi[i-W]),cy=-(psi[i+1]-psi[i-1]),cm=Math.hypot(cx,cy)+1e-9;const w=ss(0.004,0.03,gm);
     let tx=-gy/(gm+1e-9),ty=gx/(gm+1e-9);if(tx*cx+ty*cy<0){tx=-tx;ty=-ty}
     const fx=tx*w+cx/cm*(1-w),fy=ty*w+cy/cm*(1-w),fm=Math.hypot(fx,fy)+1e-9;FX[i]=fx/fm;FY[i]=fy/fm}
-  const[c,g]=canvasOf(W,H);g.fillStyle="#1d2a44";g.fillRect(0,0,W,H);g.globalAlpha=0.85;g.filter="blur("+Math.round(W/150)+"px) saturate(1.4)";g.drawImage(src,0,0,W,H);g.filter="none";g.globalAlpha=1;
+  const[c,g]=canvasOf(W,H);g.fillStyle="#1d2a44";g.fillRect(0,0,W,H);g.globalAlpha=0.85;g.imageSmoothingQuality="high";g.drawImage(soften(src,W,H,Math.round(W/150)),0,0,W,H);g.globalAlpha=1;
   g.lineCap="round";g.lineJoin="round";const base=(1.8+cfg.size*1.1)*W/1000;
   for(const[mul,dens]of[[2.4,1.1],[1.5,1.2],[1,0.9]]){const w=base*mul,step=w*1.1,nst=7;const n=Math.round(W*H/(w*step*nst)*dens);
     for(let k=0;k<n;k++){let x=r()*W,y=r()*H;const i0=(y|0)*W+(x|0);let[Lc,a,b]=rgb2lab(px[i0*4],px[i0*4+1],px[i0*4+2]);
@@ -612,24 +614,29 @@ const RATIOS=[["photo","Match photo"],["5:6","5 : 6"],["4:5","4 : 5"],["3:4","3 
 
 /* ---------------- render workers ---------------- */
 const ENGINE_URL=URL.createObjectURL(new Blob([document.getElementById("engine-src").textContent],{type:"text/javascript"}));
-class Renderer{constructor(){this.w=null;this.job=0;this.pending=null}
+// crash guard: remember which style is painting; if the app dies mid-paint, the next launch skips it
+function crashMark(who,style){try{style?localStorage.setItem("da-pending-"+who,style):localStorage.removeItem("da-pending-"+who)}catch(e){}}
+const crashed=new Set();for(const who of["preview","thumb","save"]){try{const s=localStorage.getItem("da-pending-"+who);if(s)crashed.add(s);localStorage.removeItem("da-pending-"+who)}catch(e){}}
+class Renderer{constructor(who){this.who=who;this.w=null;this.job=0;this.pending=null}
   run(style,cfg,bitmap){ // a new request cancels whatever is still running
     if(this.pending){this.w.terminate();this.w=null;this.pending.reject({cancelled:true});this.pending=null}
     if(!this.w)this.w=new Worker(ENGINE_URL);
-    const id=++this.job;
+    const id=++this.job;crashMark(this.who,style);
     return new Promise((resolve,reject)=>{this.pending={resolve,reject};
-      this.w.onmessage=e=>{if(e.data.id!==id)return;this.pending=null;e.data.ok?resolve(e.data):reject(e.data)};
-      this.w.onerror=e=>{this.pending=null;reject({error:e.message||"render failed"})};
+      this.w.onmessage=e=>{if(e.data.id!==id)return;this.pending=null;crashMark(this.who,null);e.data.ok?resolve(e.data):reject(e.data)};
+      this.w.onerror=e=>{this.pending=null;crashMark(this.who,null);reject({error:e.message||"render failed"})};
       this.w.postMessage({id,style,cfg,bitmap})})}}
-const preview=new Renderer(),thumbR=new Renderer(),saver=new Renderer();
+const preview=new Renderer("preview"),thumbR=new Renderer("thumb"),saver=new Renderer("save");
 
 /* ---------------- state ---------------- */
 const $=id=>document.getElementById(id);
+const hex=c=>"#"+c.map(v=>Math.round(v).toString(16).padStart(2,"0")).join("");
 const state={style:"blocks",sizes:{},ground:{},skipbg:false,pbn:false,ratio:"5:6",cw:100,ch:120,ncol:24,bitmap:null,photoW:1,photoH:1,srcName:"painting",origURL:null,lastCanvas:null};
 for(const[k,m]of STYLES){state.sizes[k]=m.size.def;if(m.ground)state.ground[k]=m.ground}
 try{const s=JSON.parse(localStorage.getItem("da-studio")||"{}");if(s.style&&META[s.style])state.style=s.style;
   if(s.sizes)for(const k in s.sizes)if(META[k])state.sizes[k]=s.sizes[k];if(s.ground)Object.assign(state.ground,s.ground);
   if(s.ratio)state.ratio=s.ratio;if(s.cw)state.cw=s.cw;if(s.ch)state.ch=s.ch;if(s.ncol)state.ncol=s.ncol}catch(e){}
+if(crashed.has(state.style))state.style="blocks";
 function persist(){try{localStorage.setItem("da-studio",JSON.stringify({style:state.style,sizes:state.sizes,ground:state.ground,ratio:state.ratio,cw:state.cw,ch:state.ch,ncol:state.ncol}))}catch(e){}}
 
 function toast(msg){const t=$("toast");t.textContent=msg;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,2600)}
@@ -674,7 +681,7 @@ let timer=null;
 function go(delay=120){clearTimeout(timer);if(state.bitmap)$("view").classList.add("busy");timer=setTimeout(renderNow,delay)}
 async function renderNow(){if(!state.bitmap)return;const view=$("view");view.classList.add("busy");const style=state.style;
   try{const res=await preview.run(style,cfgFor(style,1000),state.prev);show(res,style)}
-  catch(e){if(e&&e.cancelled)return;toast("Could not paint that: "+(e.error||"unknown error"));view.classList.remove("busy")}}
+  catch(e){if(e&&e.cancelled)return;toast("Could not paint that: "+(e.error||e.message||String(e)));view.classList.remove("busy")}}
 function toCanvas(res){const c=document.createElement("canvas");c.width=res.w;c.height=res.h;c.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(res.buf),res.w,res.h),0,0);return c}
 function show(res,style){const c=toCanvas(res);state.lastCanvas=c;
   c.toBlob(b=>{const old=$("out").src;$("out").src=URL.createObjectURL(b);if(old.startsWith("blob:"))setTimeout(()=>URL.revokeObjectURL(old),1000);$("view").classList.remove("busy")},"image/jpeg",0.9);
@@ -685,7 +692,7 @@ function show(res,style){const c=toCanvas(res);state.lastCanvas=c;
 
 // thumbnails of every style from the current photo, one at a time in their own worker
 let thumbGen=0;
-async function thumbs(){const gen=++thumbGen;for(const[k]of STYLES){if(gen!==thumbGen)return;
+async function thumbs(){const gen=++thumbGen;for(const[k]of STYLES){if(gen!==thumbGen)return;if(crashed.has(k))continue;
   try{const cfg={...cfgFor(k,180),cw:100,ch:100,size:k==="blocks"?2.5:Math.min(10,META[k].size.def+2),pbn:false,subjectOnly:false};
     const res=await thumbR.run(k,cfg,state.thumb);if(gen!==thumbGen)return;const c=toCanvas(res);
     const tc=stylesEl.querySelector(`[data-k="${k}"] canvas`).getContext("2d");tc.drawImage(c,0,0,168,168)}catch(e){if(e&&e.cancelled)return}}}
@@ -728,10 +735,12 @@ $("save").onclick=async()=>{if(!state.bitmap)return;toast("Painting full size…
     const url=c.toDataURL("image/jpeg",0.92);
     if(app&&app.saveImage){app.saveImage(url,name);return}
     const a=document.createElement("a");a.href=url;a.download=name+".jpg";document.body.appendChild(a);a.click();a.remove();toast("Saved "+name+".jpg")}
-  catch(e){if(!(e&&e.cancelled))toast("Could not save: "+(e.error||"unknown error"))}};
+  catch(e){if(!(e&&e.cancelled))toast("Could not save: "+(e.error||e.message||String(e)))}};
 if(app){$("upd").hidden=false;$("upd").onclick=()=>app.checkForUpdate();try{$("appver").textContent="v"+app.version()}catch(e){}}
 
 syncControls();
 (async()=>{const b=await (await fetch(SAMPLE)).blob();const bm=await createImageBitmap(b);await setPhoto(bm,SAMPLE,"Sample: NASA portrait (public domain)");state.srcName="sample"})();
+if(crashed.size){const names=[...crashed].map(k=>META[k]?META[k].name:k).join(", ");persist();
+  setTimeout(()=>toast(`The app closed while painting ${names}, so it reopened on Block impasto.`),600)}
 </script>
 </html>
