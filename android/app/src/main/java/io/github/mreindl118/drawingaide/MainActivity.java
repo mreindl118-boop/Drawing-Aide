@@ -11,6 +11,7 @@ import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -46,6 +47,20 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        buildWebView(state);
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                && checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, 2);
+        }
+
+        updater = new Updater(this);
+        updater.checkOnLaunch();
+        handleShare(getIntent());
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private void buildWebView(Bundle state) {
         web = new WebView(this);
         setContentView(web);
 
@@ -56,6 +71,17 @@ public class MainActivity extends Activity {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 return loader.shouldInterceptRequest(request.getUrl());
+            }
+
+            /* If Android kills the page's renderer (usually for memory), rebuild the page
+               instead of letting the whole app crash. */
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                if (view != web) return true;
+                buildWebView(null);   // replaces the dead view on screen
+                view.destroy();
+                toast("That painting ran out of memory, so the studio restarted. Try a larger block size.");
+                return true;
             }
         });
         web.setWebChromeClient(new WebChromeClient() {
@@ -85,16 +111,6 @@ public class MainActivity extends Activity {
 
         if (state != null) web.restoreState(state);
         else web.loadUrl(START_URL);
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
-                && checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, 2);
-        }
-
-        updater = new Updater(this);
-        updater.checkOnLaunch();
-        handleShare(getIntent());
     }
 
     @Override
