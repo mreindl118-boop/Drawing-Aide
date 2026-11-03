@@ -644,6 +644,7 @@ const ENGINE_URL=URL.createObjectURL(new Blob([document.getElementById("engine-s
 function crashMark(who,style){try{style?localStorage.setItem("da-pending-"+who,style):localStorage.removeItem("da-pending-"+who)}catch(e){}}
 const crashed=new Set();for(const who of["preview","thumb","save"]){try{const s=localStorage.getItem("da-pending-"+who);if(s)crashed.add(s);localStorage.removeItem("da-pending-"+who)}catch(e){}}
 class Renderer{constructor(who){this.who=who;this.w=null;this.job=0;this.pending=null}
+  cancel(){if(this.pending){this.w.terminate();this.w=null;crashMark(this.who,null);const p=this.pending;this.pending=null;p.reject({cancelled:true})}}
   run(style,cfg,bitmap){ // a new request cancels whatever is still running
     if(this.pending){this.w.terminate();this.w=null;this.pending.reject({cancelled:true});this.pending=null}
     if(!this.w)this.w=new Worker(ENGINE_URL);
@@ -705,12 +706,14 @@ function syncControls(){
 /* ---------------- rendering ---------------- */
 let timer=null;
 function go(delay=120){clearTimeout(timer);if(state.bitmap)$("view").classList.add("busy");timer=setTimeout(renderNow,delay)}
-async function renderNow(){if(!state.bitmap)return;const view=$("view");view.classList.add("busy");const style=state.style;
-  try{const res=await preview.run(style,cfgFor(style,1000),state.prev);show(res,style)}
+// every change paints a quick small draft first, then the sharp version; thumbnails pause meanwhile
+async function renderNow(){if(!state.bitmap)return;const view=$("view");view.classList.add("busy");const style=state.style;thumbR.cancel();
+  try{const draft=await preview.run(style,cfgFor(style,460),state.thumbBig||state.prev);show(draft,style,true);
+    const res=await preview.run(style,cfgFor(style,1000),state.prev);show(res,style)}
   catch(e){if(e&&e.cancelled)return;toast("Could not paint that: "+(e.error||e.message||String(e)));view.classList.remove("busy")}}
 function toCanvas(res){const c=document.createElement("canvas");c.width=res.w;c.height=res.h;c.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(res.buf),res.w,res.h),0,0);return c}
-function show(res,style){const c=toCanvas(res);state.lastCanvas=c;
-  c.toBlob(b=>{const old=$("out").src;$("out").src=URL.createObjectURL(b);if(old.startsWith("blob:"))setTimeout(()=>URL.revokeObjectURL(old),1000);$("view").classList.remove("busy")},"image/jpeg",0.9);
+function show(res,style,draft){const c=toCanvas(res);state.lastCanvas=c;
+  c.toBlob(b=>{const old=$("out").src;$("out").src=URL.createObjectURL(b);if(old.startsWith("blob:"))setTimeout(()=>URL.revokeObjectURL(old),1000);if(!draft)$("view").classList.remove("busy")},"image/jpeg",draft?0.8:0.9);
   $("meta").innerHTML=Object.entries({...res.info}).map(([k,v])=>`<span>${k} <b>${v}</b></span>`).join("");
   const pal=res.pal;$("palSec").hidden=!pal;
   if(pal){const unit=res.counts&&res.countUnit!=="px"?res.countUnit:null;
@@ -719,10 +722,10 @@ function show(res,style){const c=toCanvas(res);state.lastCanvas=c;
 // thumbnails of every style from the current photo, one at a time in their own worker
 let thumbGen=0;
 const idle=()=>new Promise(res=>{const chk=()=>preview.pending||$("view").classList.contains("busy")?setTimeout(chk,200):res();chk()});
-async function thumbs(){const gen=++thumbGen;for(const[k]of STYLES){await idle();if(gen!==thumbGen)return;if(crashed.has(k))continue;
+async function thumbs(){const gen=++thumbGen;for(let j=0;j<STYLES.length;j++){const k=STYLES[j][0];await idle();if(gen!==thumbGen)return;if(crashed.has(k))continue;
   try{const cfg={...cfgFor(k,150),cw:100,ch:100,size:k==="blocks"?2.5:Math.min(10,META[k].size.def+2),pbn:false,subjectOnly:false};
     const res=await thumbR.run(k,cfg,state.thumb);if(gen!==thumbGen)return;const c=toCanvas(res);
-    const tc=stylesEl.querySelector(`[data-k="${k}"] canvas`).getContext("2d");tc.drawImage(c,0,0,168,168)}catch(e){if(e&&e.cancelled)return}}}
+    const tc=stylesEl.querySelector(`[data-k="${k}"] canvas`).getContext("2d");tc.drawImage(c,0,0,168,168)}catch(e){if(e&&e.cancelled)j--}}}
 
 /* ---------------- inputs ---------------- */
 $("size").addEventListener("input",()=>{state.sizes[state.style]=sliderToVal();$("sizeVal").textContent=META[state.style].size.fmt(state.sizes[state.style]);persist();go(150)});
@@ -736,8 +739,8 @@ async function loadBlob(blob,name){try{const full=await createImageBitmap(blob);
 // phone photos can be 12-50 megapixels; keep only small copies so the app never runs out of memory
 async function shrink(bm,max){const s=Math.min(1,max/Math.max(bm.width,bm.height));if(s>=1)return bm;
   return createImageBitmap(bm,{resizeWidth:Math.max(1,Math.round(bm.width*s)),resizeHeight:Math.max(1,Math.round(bm.height*s)),resizeQuality:"high"})}
-async function setPhoto(bm,url,name){for(const k of["prev","thumb","bitmap"]){const o=state[k];if(o&&o!==bm&&o.close)try{o.close()}catch(e){}}
-  state.prev=await shrink(bm,1200);state.thumb=await shrink(bm,300);if(state.origURL&&state.origURL.startsWith("blob:"))URL.revokeObjectURL(state.origURL);
+async function setPhoto(bm,url,name){for(const k of["prev","thumbBig","thumb","bitmap"]){const o=state[k];if(o&&o!==bm&&o.close)try{o.close()}catch(e){}}
+  state.prev=await shrink(bm,1200);state.thumbBig=await shrink(bm,560);state.thumb=await shrink(bm,300);if(state.origURL&&state.origURL.startsWith("blob:"))URL.revokeObjectURL(state.origURL);
   state.bitmap=bm;state.photoW=bm.width;state.photoH=bm.height;state.origURL=url;$("orig").src=url;
   state.srcName=(name||"painting").replace(/\.[^.]+$/,"");$("srcName").textContent=name||"Your photo";
   if(state.ratio!=="free"){const land=bm.width>bm.height;if(state.ratio!=="photo"&&(state.cw>state.ch)!==land&&state.cw!==state.ch){[state.cw,state.ch]=[state.ch,state.cw]}applyRatio("cw")}
